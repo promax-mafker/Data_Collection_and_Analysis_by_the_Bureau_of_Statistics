@@ -1,0 +1,31 @@
+seeds:
+  - url: https://www.stats.gov.cn/
+    name: 国家统计局
+    region: 中国
+    level: national
+province_anchor: https://tjj.fujian.gov.cn/
+expected_cities:
+  - 福州市
+  - 厦门市
+  - 漳州市
+  - 泉州市
+  - 三明市
+  - 莆田市
+  - 南平市
+  - 龙岩市
+  - 宁德市
+known_domains:
+  - tjj.fujian.gov.cn
+  - tjj.fuzhou.gov.cn
+  - tjj.xm.gov.cn
+  - tjj.zhangzhou.gov.cn
+  - tjj.quanzhou.gov.cn
+  - tjj.sm.gov.cn
+  - tjj.np.gov.cn
+  - lytjj.longyan.gov.cn
+  - tjj.ningde.gov.cn
+exclude_domains:
+  - www.stats.gov.cn
+bulletin_keywords:
+  - 统计公报
+  - 国民经济和社会发展统计公报

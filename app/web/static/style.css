@@ -1,0 +1,9 @@
+body { font-family: system-ui, sans-serif; margin: 24px; color: #222; }
+header h1 { margin: 0 0 4px; }
+header p { color: #666; margin: 0 0 16px; }
+section { margin: 16px 0; padding: 16px; border: 1px solid #ddd; border-radius: 6px; }
+button { padding: 6px 14px; cursor: pointer; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ddd; padding: 4px 8px; font-size: 13px; text-align: left; }
+#runDetail { white-space: pre-wrap; background: #f6f6f6; padding: 8px; max-height: 240px; overflow: auto; }
+input { margin-right: 8px; padding: 4px; }
