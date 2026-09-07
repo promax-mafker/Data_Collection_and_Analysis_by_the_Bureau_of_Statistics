@@ -379,3 +379,76 @@ class Repository:
             params.append(list_type)
         sql += " ORDER BY id"
         return [dict(r) for r in self.conn.execute(sql, params)]
+
+    # ---------- M6: industry_data / econ_series / enterprise_industry ----------
+
+    def replace_industry_data(self, source, rows) -> int:
+        """rows: list[dict(industry, year, metric, value, unit, raw_text)]；按 source 整批替换。"""
+        self.conn.execute("DELETE FROM industry_data WHERE source=?", (source,))
+        n = 0
+        for r in rows:
+            self.conn.execute(
+                "INSERT INTO industry_data (source, industry, year, metric, value, unit, raw_text) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (source, r.get("industry", ""), r.get("year", ""), r.get("metric", ""),
+                 r.get("value", ""), r.get("unit", ""), r.get("raw_text", "")))
+            n += 1
+        self.conn.commit()
+        return n
+
+    def list_industry_data(self, source=None, industry=None, metric=None):
+        sql = "SELECT * FROM industry_data WHERE 1=1"
+        params = []
+        if source:
+            sql += " AND source=?"
+            params.append(source)
+        if industry:
+            sql += " AND industry=?"
+            params.append(industry)
+        if metric:
+            sql += " AND metric=?"
+            params.append(metric)
+        sql += " ORDER BY id"
+        return [dict(r) for r in self.conn.execute(sql, params)]
+
+    def replace_econ_series(self, source, rows) -> int:
+        """rows: list[dict(indicator, year, value, unit, note, raw_text)]；按 source 整批替换。"""
+        self.conn.execute("DELETE FROM econ_series WHERE source=?", (source,))
+        n = 0
+        for r in rows:
+            self.conn.execute(
+                "INSERT INTO econ_series (source, indicator, year, value, unit, note, raw_text) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (source, r.get("indicator", ""), r.get("year", ""), r.get("value", ""),
+                 r.get("unit", ""), r.get("note", ""), r.get("raw_text", "")))
+            n += 1
+        self.conn.commit()
+        return n
+
+    def list_econ_series(self, source=None, indicator=None):
+        sql = "SELECT * FROM econ_series WHERE 1=1"
+        params = []
+        if source:
+            sql += " AND source=?"
+            params.append(source)
+        if indicator:
+            sql += " AND indicator=?"
+            params.append(indicator)
+        sql += " ORDER BY year, id"
+        return [dict(r) for r in self.conn.execute(sql, params)]
+
+    def replace_enterprise_industry(self, rows) -> int:
+        """rows: list[dict(enterprise_id, industry, method)]；按 id upsert。"""
+        n = 0
+        for r in rows:
+            self.conn.execute(
+                "INSERT INTO enterprise_industry (enterprise_id, industry, method) VALUES (?,?,?) "
+                "ON CONFLICT(enterprise_id) DO UPDATE SET industry=excluded.industry, method=excluded.method",
+                (r.get("enterprise_id"), r.get("industry", ""), r.get("method", "")))
+            n += 1
+        self.conn.commit()
+        return n
+
+    def list_enterprise_industry(self):
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM enterprise_industry ORDER BY enterprise_id")]

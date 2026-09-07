@@ -71,6 +71,33 @@ CREATE TABLE IF NOT EXISTS enterprises (
   county TEXT,
   rank TEXT
 );
+CREATE TABLE IF NOT EXISTS industry_data (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT,
+  industry TEXT,
+  year TEXT,
+  metric TEXT,
+  value TEXT,
+  unit TEXT,
+  raw_text TEXT,
+  extracted_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS econ_series (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT,
+  indicator TEXT,
+  year TEXT,
+  value TEXT,
+  unit TEXT,
+  note TEXT,
+  raw_text TEXT,
+  extracted_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS enterprise_industry (
+  enterprise_id INTEGER PRIMARY KEY,
+  industry TEXT,
+  method TEXT
+);
 """
 
 def connect(path: str) -> sqlite3.Connection:

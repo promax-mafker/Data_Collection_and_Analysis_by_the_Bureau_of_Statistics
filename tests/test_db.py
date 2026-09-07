@@ -80,3 +80,33 @@ def test_enterprises_table_columns(tmp_path):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(enterprises)").fetchall()]
     for expect in ("id", "page_id", "year", "list_type", "name", "county", "rank"):
         assert expect in cols
+
+
+def test_industry_data_table_columns(tmp_path):
+    conn = init_db(str(tmp_path / "t.db"))
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(industry_data)").fetchall()]
+    for expect in ("id", "source", "industry", "year", "metric", "value", "unit", "raw_text"):
+        assert expect in cols
+
+
+def test_econ_series_table_columns(tmp_path):
+    conn = init_db(str(tmp_path / "t.db"))
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(econ_series)").fetchall()]
+    for expect in ("id", "source", "indicator", "year", "value", "unit", "note", "raw_text"):
+        assert expect in cols
+
+
+def test_enterprise_industry_table_columns(tmp_path):
+    conn = init_db(str(tmp_path / "t.db"))
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(enterprise_industry)").fetchall()]
+    for expect in ("enterprise_id", "industry", "method"):
+        assert expect in cols
+
+
+def test_m6_tables_idempotent(tmp_path):
+    path = str(tmp_path / "t.db")
+    init_db(path)
+    init_db(path)
+    conn = connect(path)
+    for t in ("industry_data", "econ_series", "enterprise_industry"):
+        assert conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] == 0

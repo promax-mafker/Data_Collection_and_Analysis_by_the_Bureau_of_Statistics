@@ -16,6 +16,26 @@ def main():
     db_path = os.path.join(base, "data", "stats.db")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     repo = Repository(init_db(db_path))
+
+    # M6 经济驱动画像（独立命令）
+    if "--economy" in sys.argv:
+        from app.fetch.industry_documents import run_industry_sources
+        from app.analysis.economy_report import render_economy_report
+        cfg = os.path.join(base, "config", "industry_sources.yaml")
+        client = HttpClient(verify=False)  # 年鉴站证书自签名
+        print("开始采集 M6 实际产业结构 + 三驾马车数据…")
+        stats = run_industry_sources(client, repo, cfg)
+        print(f"采集完成: series={stats['series']} industry_rows={stats['industry_rows']} "
+              f"enterprises={stats['enterprises']} errors={stats['errors']}")
+        html = render_economy_report(repo)
+        out_dir = os.path.join(base, "data", "reports")
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, "quanzhou_economy.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"经济驱动画像报告: {path}")
+        return
+
     client = HttpClient()
     llm = LLMClient()
 

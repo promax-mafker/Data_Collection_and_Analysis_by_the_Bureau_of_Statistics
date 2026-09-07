@@ -156,6 +156,12 @@ def api_quanzhou_report(format: str = "html"):
                                  media_type="text/markdown; charset=utf-8")
     return HTMLResponse(render_quanzhou_html(profile))
 
+@app.get("/api/quanzhou/economy")
+def api_quanzhou_economy():
+    """M6 经济驱动画像（Kami Parchment HTML）。"""
+    from .analysis.economy_report import render_economy_report
+    return HTMLResponse(render_economy_report(build_repo()))
+
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "app", "web", "static"), html=True), name="static")
 
 if __name__ == "__main__":

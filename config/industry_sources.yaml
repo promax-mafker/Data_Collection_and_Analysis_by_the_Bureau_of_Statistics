@@ -1,0 +1,58 @@
+# 泉州「实际产业结构 + 三驾马车」数据源注册表（M6）
+# 全部 URL 经侦察实测（2026-09）。五经普/年鉴站需 verify=False（自签名证书）。
+region: 泉州市
+yearbook_base: https://tjj.quanzhou.gov.cn/tsys/UpLoadFiles/43sjfb/129ndsj/qztjnj2025/
+census:
+  - id: census1
+    url: https://tjj.quanzhou.gov.cn/tjzl/tjgb/202505/t20250512_3168240.htm
+    desc: 五经普第一号·单位基本情况（表1-2 法人单位数/表1-3 从业人员/表1-4 营业收入）
+  - id: census2
+    url: https://tjj.quanzhou.gov.cn/tjzl/tjgb/202505/t20250512_3168260.htm
+    desc: 五经普第二号·工业（表2-2 分行业单位+从业/表2-3 分行业营收资产负债）
+yearbook_tables:
+  - id: pop_3_4
+    path: cn/html/0304_3-4.html
+    kind: econ
+    indicator: population
+    desc: 主要年份年末常住人口及人口变动
+  - id: income_4_7
+    path: cn/html/0407_4-7.html
+    kind: econ
+    indicator: income_consumption
+    desc: 全体居民人均可支配收入与消费支出（含8大类分项）
+  - id: cpi_5_2
+    path: cn/html/0502_5-2.html
+    kind: econ
+    indicator: cpi
+    desc: 历年居民消费价格指数（1984—2024）
+  - id: industry_8_7
+    path: cn/html/0807_规模以上工业主要经济指标（2024年）.html
+    kind: industry
+    desc: 规模以上工业主要经济指标（2024年，分行业）
+  - id: industry_8_8
+    path: cn/html/0808_9-7.html
+    kind: industry
+    dual_header: true
+    desc: 规模以上工业重点产业情况（2016—2024年，双列头：企业单位数+增加值增长）
+  - id: trade_12_3
+    path: cn/html/1203_12-3.html
+    kind: econ
+    indicator: trade
+    desc: 历年进出口总额（出口/进口分列）
+debt:
+  - id: debt_2024
+    url: https://czj.quanzhou.gov.cn/ztzl/zfzw/202503/t20250312_3147982.htm
+    year: "2024"
+    kind: html
+  - id: debt_2023
+    url: https://czj.quanzhou.gov.cn/ztzl/jsgkpt/sjys/202402/t20240218_3005325.htm
+    year: "2023"
+    kind: html
+  - id: debt_2022
+    url: http://czj.quanzhou.gov.cn/ztzl/jsgkpt/sjys/202302/P020241106328780062391.pdf
+    year: "2022"
+    kind: pdf
+  - id: debt_2021
+    url: https://quanzhou.gov.cn/zfb/xxgk/ztxxgk/czzj/zfzw/202201/t20220129_2693380.htm
+    year: "2021"
+    kind: html
