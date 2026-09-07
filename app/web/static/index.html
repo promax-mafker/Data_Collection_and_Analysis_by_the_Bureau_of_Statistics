@@ -44,6 +44,17 @@
       <iframe id="analysisFrame" title="分析报告"
               style="width:100%;height:560px;border:1px solid #ddd;border-radius:6px"></iframe>
     </section>
+    <section id="quanzhou">
+      <h2>泉州经济纵深画像（M5 样板）</h2>
+      <div id="qzControls">
+        <button id="qzRunBtn">采集并分析</button>
+        <span id="qzStatus"></span>
+        <a href="/api/quanzhou/report?format=md" target="_blank">查看 Markdown</a>
+      </div>
+      <p id="qzInfo" class="msg"></p>
+      <iframe id="qzFrame" title="泉州经济纵深画像"
+              style="width:100%;height:640px;border:1px solid #ddd;border-radius:6px"></iframe>
+    </section>
   </main>
   <script src="/app.js"></script>
 </body>

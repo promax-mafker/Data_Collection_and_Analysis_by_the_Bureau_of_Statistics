@@ -1,4 +1,5 @@
 import os
+import sys
 from app.store.db import init_db
 from app.store.repository import Repository
 from app.discovery.registry import Registry
@@ -6,7 +7,16 @@ from app.extract.rule_extractor import load_rules
 from app.fetch.client import HttpClient
 from app.orchestrator import run_pipeline
 
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "analyze":
+        from analyze import main as analyze_main
+        analyze_main()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "quanzhou":
+        from quanzhou import main as qz_main
+        qz_main()
+        return
     base = os.path.dirname(os.path.abspath(__file__))
     db_path = os.path.join(base, "data", "stats.db")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)

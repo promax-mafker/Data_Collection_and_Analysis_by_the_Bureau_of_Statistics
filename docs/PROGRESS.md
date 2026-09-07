@@ -26,7 +26,8 @@
 | M4.1 缺口治理 | ✅ 完成 | 覆盖「零数据」缺口：列表页下钻 / fallback 补漏 / 自洽校验 / listing_urls（详见 §4.2） |
 | M4.2 查询宽容层 | ✅ 完成 | 解决「数据在库却查不到」：地区剥前缀/补全、年份容错、指标别名、歧义提示（详见 §4.3） |
 | M4.3 整句自然查询 | ✅ 完成 | 一句话同时抽地区/指标/年份，支持多地区并列与「人均」防误配（详见 §4.4） |
-| M5 二期规划 | ⏳ 未开始 | 见 §6 |
+| M5 泉州纵深画像 | ✅ 完成 | 政府公开文件全家桶：规划/报告/预决算/企业名录；LLM 抽取+批判审读+数理分析（详见 §4.5） |
+| M6 二期规划 | ⏳ 未开始 | 见 §6 |
 
 ## 3. 当前能力清单（已验证）
 
@@ -116,6 +117,29 @@
 
 前端：主输入框 placeholder 即示例句；`matched` 回显让用户确认系统理解正确；导出按钮携带当前查询。测试 47 → 57。
 
+### 4.5 泉州经济纵深画像（2026-09，M5）
+
+用户指出「只有最抽象的截面，看不到支柱产业/核心机构/就业岗位分布/财税结构」。经澄清+侦察（5 类源全部实测 200 直连），落地**政府公开文件全家桶**单市样板（设计 `docs/DESIGN_M5_QUANZHOU.md`、计划 `docs/PLAN_M5_QUANZHOU.md`）：
+
+| 维度 | 数据源 | 引擎 | 真实验证产出 |
+|------|--------|------|------------|
+| 财政税收结构 | 2025 统计公报 + 2026 预算执行 | 规则 | 收入 592.07 / 支出 880.29 / 基金 292.07 / 税收 814.34；自给率 67.26%、土地依赖 33.03% |
+| 支柱产业图谱 | 十五五纲要(8.9 万字 PDF) 第三/六章 | LLM | 50 条产业洞察（含定位/规模/evidence） |
+| 核心机构/市场主体 | 2025 上市后备企业名单(HTML 表格) | 表格 | **170 家**，县区 HHI 0.19（Top：晋江 53 家） |
+| 就业岗位分布 | 统计公报 | 规则 | 城镇新增就业 9.49 万人 |
+| 五年规划路径 | 政府工作报告「预期目标」段 | LLM | GDP 增速目标 5% |
+
+**防数据美化（用户指定）**：`app/extract/critique.py` 双通道——规则校验 C1-C7（口径一致/三产恒等式/跨年突变/弹性异常/土地依赖/就业背离）+ LLM 批判审读（spin/omission/metric_game/gap，强制 evidence + confidence）。审读层只做「提示与质疑」不修改数据、不下「造假」结论。
+
+**关键工程攻坚（真实验证暴露，均有回归测试）**：
+- requests 走系统代理导致 LLM 大请求超时 → LLMClient 显式 `proxies=None` 直连（根因）
+- 规划纲要 PDF 含目录，章节锚点误命中目录 → `start_marker` 跳目录 + `sections` 起止锚点对精准抽取（只送第三/六/十一章，政治性总论不抽）
+- 复杂 schema + 长文本导致 qwen3.8-flash 生成慢 → 精简 schema、块 ≤2500 字、max_tokens 2000、超时 180s+重试
+- 泉州画像串入福建省/漳州同名指标值 → 分析层全维度 `region='泉州市'` 隔离（回归测试 `test_region_isolation_no_cross_pollution`）
+- 「政府性基金**预算**收入」表述 → 规则加「预算」可选
+
+测试 57 → 127；泉州核心数据（GDP 13778.34 等）此前未入库，本轮公报源补齐 14 指标。报告 `data/reports/quanzhou_profile.md/html`（七章）。Web 新增「泉州画像」Tab（`/api/quanzhou/*`）。
+
 ## 5. 已知限制 / 技术债
 
 | 类别 | 说明 | 影响 |
@@ -125,22 +149,26 @@
 | 规则局限 | 个别公报排版极端（如三明 2025 GDP 段）仍可能漏抽 | fallback 已覆盖多数；`raw_text` 溯源 |
 | 港澳台口径 | 公报注脚（金门/马祖等口径差异）未建模 | 数据含注脚说明，分析时注意 |
 | 莆田 PDF | 若为扫描版 PDF 无法提取文字 | 需 OCR（未引入） |
-| token 安全 | GitHub MCP token 明文在 `.mcp.json`（已 gitignore） | 建议定期轮换 |
+| token 安全 | GitHub MCP token 明文在 `.mcp.json`、LLM key 在 `.env`（均 gitignore） | 建议定期轮换 |
+| LLM 调用慢/抖动 | qwen3.8-flash 对长文本偶发生成慢；单市全量 ~10 分钟 | 已用 sections 精准切+2500 字块+超时重试缓解 |
+| 泉州常住人口缺 | 泉州公报仅「年末户籍人口 773.49 万」，无常住人口口径 | 就业密度等派生指标为 None，不编造 |
 
-## 6. 二期候选（M5，未排期）
+## 6. 二期候选（M6，未排期）
 
-1. `LLMExtractor` 落地（OpenAI 兼容端点）：非结构化理解、城镇/农村收入细分。
+1. `LLMExtractor` 深化：城镇/农村收入细分、批判审读对全 9 市推广。
 2. 增量刷新策略：新规则应用存量页（清库重跑或按 hash 变更强制刷新）。
 3. 全国扩展（31 省 + 全部地级市；`manual_bureaus` 覆盖无独立域名站点）。
-5. 采集/分析结果与报告的抽样质量校验工具化。
+4. 采集/分析结果与报告的抽样质量校验工具化。
+5. 泉州样板推广到福建其余 8 市（复用 quanzhou_sources.yaml 模式，抽取各市政府文件全家桶）。
 
 ## 7. 快速接续（下次会话从这里开始）
 
 ```bash
 cd E:\Deepseek_harness\stats-collector
-.venv\Scripts\python -m pytest -q          # 确认 57 passed
-.venv\Scripts\python run.py                 # 一键采集（网络抖动漏检可重跑）
-.venv\Scripts\python run.py analyze         # 生成 data/reports/report.html
+.venv\Scripts\python -m pytest -q          # 确认 127 passed
+.venv\Scripts\python run.py                 # 一键采集统计公报（网络抖动漏检可重跑）
+.venv\Scripts\python run.py analyze         # 生成 data/reports/report.html（全省横比）
+.venv\Scripts\python quanzhou.py            # 泉州纵深画像（采集+LLM+分析+报告）
 git log --oneline                           # 查看最近 commit
 ```
 

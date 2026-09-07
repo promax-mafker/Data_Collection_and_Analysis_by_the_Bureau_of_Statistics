@@ -20,6 +20,7 @@ class Page:
     dataset_type: str             # bulletin / topic
     period: str                   # 年度，如 2024
     content_hash: str
+    doc_category: str = "bulletin"  # bulletin / plan / gov_report / budget / enterprise
     status: str = "fetched"
 
 @dataclass

@@ -1,0 +1,88 @@
+# 泉州经济纵深画像 · 数据源注册表（M5）
+# 全部 URL 经侦察实测 200 直连（2026-09）。category 映射 pages.doc_category。
+# parse: rule(数值规则) | llm(文本洞察) | rule+llm | table(表格记录)
+region: 泉州市
+sources:
+  - id: plan_15
+    name: 泉州市国民经济和社会发展第十五个五年规划纲要
+    category: plan
+    url: https://www.quanzhou.gov.cn/zfb/xxgk/zfxxgkzl/zfxxgkml/srmzfxxgkml/ghjh/202605/P020260609588315746018.pdf
+    kind: pdf
+    period: "2026"
+    parse: llm
+    start_marker: 第一章 传承弘扬、创新发展“晋江经验”
+    sections:
+      - start: 第三章 培育发展新质生产力
+        end: 第四章 加强创新驱动引领
+        kind: industry
+      - start: 第六章 进一步全面深化改革
+        end: 第七章 深入推进以人为本的新型城镇化
+        kind: industry
+      - start: 第十一章 着力创造高品质生活
+        end: 第十二章 探索泉台
+        kind: employment
+  - id: gov_report_2026
+    name: 2026年泉州市政府工作报告
+    category: gov_report
+    url: https://www.quanzhou.gov.cn/zfb/xxgk/zfxxgkzl/bgzj/zfgzbg/202603/t20260310_3273077.htm
+    kind: html
+    period: "2026"
+    parse: llm
+    sections:
+      - start: 预期目标
+        end: 产业
+        kind: plan_goal
+      - start: 产业
+        end: 就业
+        kind: industry
+      - start: 就业
+        end: 财政
+        kind: employment
+  - id: budget_2026
+    name: 2026年泉州市本级预算报告
+    category: budget
+    url: https://czj.quanzhou.gov.cn/ztzl/jsgkpt/sjys/202604/t20260430_3287941.htm
+    kind: html
+    period: "2026"
+    parse: llm
+    chunk: full
+  - id: execution_h1_2026
+    name: 2026年上半年泉州市预算执行情况
+    category: budget
+    url: https://czj.quanzhou.gov.cn/zwgk/zfxxgk/fdzdgknr/czysjsbg/202607/t20260715_3309416.htm
+    kind: html
+    period: "2026"
+    parse: rule
+    numeric_rules:
+      - 地方一般公共预算收入
+      - 一般公共预算收入
+      - 税收收入
+      - 政府性基金收入
+  - id: enterprises_2025
+    name: 2025年度泉州市级上市和挂牌后备企业名单
+    category: enterprise
+    url: https://www.quanzhou.gov.cn/zfb/xxgk/zfxxgkzl/qzdt/qzyw/202510/t20251015_3218492.htm
+    kind: html
+    period: "2025"
+    parse: table
+  - id: bulletin_2025
+    name: 2025年泉州市国民经济和社会发展统计公报
+    category: bulletin
+    url: http://tjj.quanzhou.gov.cn/tjzl/tjgb/202603/t20260331_3279584.htm
+    kind: html
+    period: "2025"
+    parse: rule
+    numeric_rules:
+      - 地区生产总值
+      - 第一产业增加值
+      - 第二产业增加值
+      - 第三产业增加值
+      - 一般公共预算收入
+      - 一般公共预算支出
+      - 税收收入
+      - 政府性基金收入
+      - 城镇新增就业
+      - 常住人口
+      - 社会消费品零售总额
+      - 进出口总额
+      - 规模以上工业增加值

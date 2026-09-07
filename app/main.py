@@ -9,10 +9,14 @@ from .store.db import init_db
 from .store.repository import Repository
 from .discovery.registry import Registry
 from .extract.rule_extractor import load_rules
+from .extract.llm_client import LLMClient
 from .fetch.client import HttpClient
+from .fetch.documents import load_sources, run_documents
 from .orchestrator import run_pipeline
 from .analysis.core import analyze
-from .analysis.report import render_html, render_markdown
+from .analysis.quanzhou import analyze_quanzhou
+from .analysis.report import (render_html, render_markdown,
+                              render_quanzhou_markdown, render_quanzhou_html)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("STATS_DB", os.path.join(BASE_DIR, "data", "stats.db"))
@@ -99,6 +103,58 @@ def api_analysis(format: str = "html"):
         return PlainTextResponse(render_markdown(result),
                                  media_type="text/markdown; charset=utf-8")
     return HTMLResponse(render_html(result))
+
+# ---------- M5 泉州画像 ----------
+
+def _quanzhou_components():
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return (os.path.join(base, "config", "quanzhou_sources.yaml"),
+            os.path.join(CONFIG_DIR, "extract_rules.yaml"))
+
+@app.post("/api/quanzhou/run")
+def api_quanzhou_run():
+    """采集泉州政府公开文档 → 分析（同步执行）。"""
+    repo = build_repo()
+    client = HttpClient()
+    llm = LLMClient()
+    sources_path, rules_path = _quanzhou_components()
+    region, sources = load_sources(sources_path)
+    rules = load_rules(rules_path)
+    stats = run_documents(client, repo, sources, rules=rules,
+                          llm_client=llm, region=region)
+    profile = analyze_quanzhou(repo)
+    md = render_quanzhou_markdown(profile)
+    html = render_quanzhou_html(profile)
+    out_dir = os.path.join(BASE_DIR, "data", "reports")
+    from .analysis.report import write_quanzhou_report
+    path = write_quanzhou_report(out_dir, profile, md, html)
+    return {"stats": stats, "llm_enabled": llm.enabled, "report": path,
+            "profile": profile}
+
+@app.get("/api/quanzhou/status")
+def api_quanzhou_status():
+    repo = build_repo()
+    pages = repo.list_pages()
+    by_cat = {}
+    for p in pages:
+        c = p.get("doc_category") or "bulletin"
+        by_cat[c] = by_cat.get(c, 0) + 1
+    return {
+        "pages": by_cat,
+        "doc_insights": len(repo.list_doc_insights()),
+        "enterprises": len(repo.list_enterprises()),
+        "fiscal_values": len(repo.query_data(region="泉州市", indicator="地方一般公共预算收入")),
+        "llm_enabled": LLMClient().enabled,
+    }
+
+@app.get("/api/quanzhou/report")
+def api_quanzhou_report(format: str = "html"):
+    repo = build_repo()
+    profile = analyze_quanzhou(repo)
+    if format == "md":
+        return PlainTextResponse(render_quanzhou_markdown(profile),
+                                 media_type="text/markdown; charset=utf-8")
+    return HTMLResponse(render_quanzhou_html(profile))
 
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "app", "web", "static"), html=True), name="static")
 

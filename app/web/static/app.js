@@ -87,6 +87,40 @@ async function showAnalysis() {
   $("#analysisFrame").srcdoc = await r.text();
 }
 
+async function loadQuanzhouStatus() {
+  try {
+    const s = await (await fetch("/api/quanzhou/status")).json();
+    const parts = [];
+    for (const [k, v] of Object.entries(s.pages || {})) parts.push(`${k} ${v}`);
+    $("#qzInfo").textContent = "已入库：" + (parts.join("、") || "无") +
+      " · LLM 洞察 " + (s.doc_insights ?? 0) +
+      " · 企业名录 " + (s.enterprises ?? 0) +
+      " · LLM 引擎 " + (s.llm_enabled ? "启用" : "未启用");
+  } catch (e) { /* 忽略 */ }
+}
+
+async function runQuanzhou() {
+  $("#qzStatus").textContent = "采集中（含 LLM 解析，约 1-3 分钟）…";
+  try {
+    const r = await fetch("/api/quanzhou/run", { method: "POST" });
+    const d = await r.json();
+    const st = d.stats || {};
+    $("#qzStatus").textContent = `完成：pages=${st.pages} values=${st.values} insights=${st.insights} enterprises=${st.enterprises} errors=${st.errors}`;
+    const rep = await (await fetch("/api/quanzhou/report?format=html")).text();
+    $("#qzFrame").srcdoc = rep;
+    loadQuanzhouStatus();
+  } catch (e) {
+    $("#qzStatus").textContent = "失败：" + e;
+  }
+}
+
+async function showQuanzhouReport() {
+  try {
+    const r = await fetch("/api/quanzhou/report?format=html");
+    $("#qzFrame").srcdoc = await r.text();
+  } catch (e) { /* 无数据时静默 */ }
+}
+
 $("#runBtn").onclick = runPipeline;
 $("#queryBtn").onclick = queryText;
 $("#queryAdvancedBtn").onclick = queryAdvanced;
@@ -95,4 +129,7 @@ $("#fRegion").addEventListener("keydown", e => { if (e.key === "Enter") queryAdv
 $("#fIndicator").addEventListener("keydown", e => { if (e.key === "Enter") queryAdvanced(); });
 $("#fYear").addEventListener("keydown", e => { if (e.key === "Enter") queryAdvanced(); });
 $("#analysisBtn").onclick = showAnalysis;
+$("#qzRunBtn").onclick = runQuanzhou;
 loadAll();
+loadQuanzhouStatus();
+showQuanzhouReport();

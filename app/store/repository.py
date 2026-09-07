@@ -116,19 +116,25 @@ class Repository:
         row = self.conn.execute("SELECT id FROM pages WHERE url=?", (p.url,)).fetchone()
         if row:
             self.conn.execute(
-                "UPDATE pages SET title=?, content_text=?, dataset_type=?, period=?, content_hash=?, status=? WHERE id=?",
-                (p.title, p.content_text, p.dataset_type, p.period, p.content_hash, p.status, row["id"]))
+                "UPDATE pages SET title=?, content_text=?, dataset_type=?, period=?, content_hash=?, doc_category=?, status=? WHERE id=?",
+                (p.title, p.content_text, p.dataset_type, p.period, p.content_hash, p.doc_category, p.status, row["id"]))
             self.conn.commit()
             return row["id"]
         cur = self.conn.execute(
-            "INSERT INTO pages (bureau_id, url, title, content_text, dataset_type, period, content_hash, status) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (p.bureau_id, p.url, p.title, p.content_text, p.dataset_type, p.period, p.content_hash, p.status))
+            "INSERT INTO pages (bureau_id, url, title, content_text, dataset_type, period, content_hash, doc_category, status) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (p.bureau_id, p.url, p.title, p.content_text, p.dataset_type, p.period, p.content_hash, p.doc_category, p.status))
         self.conn.commit()
         return cur.lastrowid
 
-    def list_pages(self):
-        return [dict(r) for r in self.conn.execute("SELECT * FROM pages ORDER BY id")]
+    def list_pages(self, doc_category=None):
+        sql = "SELECT * FROM pages WHERE 1=1"
+        params = []
+        if doc_category:
+            sql += " AND doc_category=?"
+            params.append(doc_category)
+        sql += " ORDER BY id"
+        return [dict(r) for r in self.conn.execute(sql, params)]
 
     def page_id_by_hash(self, content_hash):
         """按内容哈希查已入库页面 id，无则 None（用于内容级去重）。"""
@@ -315,3 +321,61 @@ class Repository:
 
     def list_runs(self):
         return [dict(r) for r in self.conn.execute("SELECT * FROM runs ORDER BY id DESC")]
+
+    # ---------- M5: doc_insights / enterprises ----------
+
+    def insert_doc_insights(self, items) -> int:
+        """items: list[dict(page_id, source_id, kind, title, body, method)]，body 为 JSON 字符串。"""
+        n = 0
+        for it in items:
+            self.conn.execute(
+                "INSERT INTO doc_insights (page_id, source_id, kind, title, body, method) VALUES (?,?,?,?,?,?)",
+                (it.get("page_id"), it.get("source_id"), it.get("kind"),
+                 it.get("title", ""), it.get("body", ""), it.get("method", "llm")))
+            n += 1
+        self.conn.commit()
+        return n
+
+    def replace_doc_insights(self, page_id, items) -> int:
+        """整页替换：先删该页旧洞察再插入（页面刷新防版本累积）。"""
+        self.conn.execute("DELETE FROM doc_insights WHERE page_id=?", (page_id,))
+        for it in items:
+            it["page_id"] = page_id
+        return self.insert_doc_insights(items)
+
+    def list_doc_insights(self, page_id=None, kind=None):
+        sql = "SELECT * FROM doc_insights WHERE 1=1"
+        params = []
+        if page_id:
+            sql += " AND page_id=?"
+            params.append(page_id)
+        if kind:
+            sql += " AND kind=?"
+            params.append(kind)
+        sql += " ORDER BY id"
+        return [dict(r) for r in self.conn.execute(sql, params)]
+
+    def replace_enterprises(self, page_id, rows) -> int:
+        """rows: list[dict(year, list_type, name, county, rank)]；整页替换。"""
+        self.conn.execute("DELETE FROM enterprises WHERE page_id=?", (page_id,))
+        n = 0
+        for r in rows:
+            self.conn.execute(
+                "INSERT INTO enterprises (page_id, year, list_type, name, county, rank) VALUES (?,?,?,?,?,?)",
+                (page_id, r.get("year"), r.get("list_type", ""), r.get("name"),
+                 r.get("county", ""), r.get("rank", "")))
+            n += 1
+        self.conn.commit()
+        return n
+
+    def list_enterprises(self, year=None, list_type=None):
+        sql = "SELECT * FROM enterprises WHERE 1=1"
+        params = []
+        if year:
+            sql += " AND year=?"
+            params.append(year)
+        if list_type:
+            sql += " AND list_type=?"
+            params.append(list_type)
+        sql += " ORDER BY id"
+        return [dict(r) for r in self.conn.execute(sql, params)]

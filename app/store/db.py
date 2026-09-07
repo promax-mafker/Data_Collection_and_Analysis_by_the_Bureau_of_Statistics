@@ -52,6 +52,25 @@ CREATE TABLE IF NOT EXISTS runs (
   summary_json TEXT,
   log TEXT
 );
+CREATE TABLE IF NOT EXISTS doc_insights (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  page_id INTEGER,
+  source_id TEXT,
+  kind TEXT,
+  title TEXT,
+  body TEXT,
+  method TEXT NOT NULL DEFAULT 'llm',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS enterprises (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  page_id INTEGER,
+  year TEXT,
+  list_type TEXT,
+  name TEXT,
+  county TEXT,
+  rank TEXT
+);
 """
 
 def connect(path: str) -> sqlite3.Connection:
@@ -62,5 +81,12 @@ def connect(path: str) -> sqlite3.Connection:
 def init_db(path: str) -> sqlite3.Connection:
     conn = connect(path)
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     return conn
+
+def _migrate(conn: sqlite3.Connection):
+    """幂等迁移：旧库 pages 表无 doc_category 列时补列（旧行默认 bulletin）。"""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(pages)").fetchall()]
+    if "doc_category" not in cols:
+        conn.execute("ALTER TABLE pages ADD COLUMN doc_category TEXT NOT NULL DEFAULT 'bulletin'")
