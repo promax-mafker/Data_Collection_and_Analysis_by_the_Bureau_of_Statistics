@@ -27,21 +27,46 @@ async function loadBureaus() {
   $("#bureauList").innerHTML = bs.map(b => `<li>${b.name} (${b.level})</li>`).join("");
 }
 
+async function loadFilters() {
+  try {
+    const f = await (await fetch("/api/filters")).json();
+    const fill = (id, vals) => {
+      const dl = $(id);
+      dl.innerHTML = vals.map(v => `<option value="${v}">`).join("");
+    };
+    fill("#dlRegions", f.regions);
+    fill("#dlIndicators", f.indicators);
+    fill("#dlYears", f.years);
+  } catch (e) { /* 候选提示失败不影响查询 */ }
+}
+
 async function queryData() {
   const p = new URLSearchParams();
   if ($("#fRegion").value) p.set("region", $("#fRegion").value);
   if ($("#fIndicator").value) p.set("indicator", $("#fIndicator").value);
   if ($("#fYear").value) p.set("year", $("#fYear").value);
-  const rows = await (await fetch("/api/data?" + p)).json();
+  const d = await (await fetch("/api/data?" + p)).json();
+  const rows = d.rows || [];
   const cols = rows.length ? Object.keys(rows[0]) : [];
   document.querySelector("#dataTable thead tr").innerHTML =
     cols.map(c => `<th>${c}</th>`).join("");
   $("#dataTable tbody").innerHTML = rows.map(r =>
     `<tr>${cols.map(c => `<td>${r[c] ?? ""}</td>`).join("")}</tr>`).join("");
+  const warns = d.warnings || [];
+  $("#queryMsg").textContent = warns.length
+    ? "提示：" + warns.join("；") : (rows.length ? "" : "（无匹配数据）");
+  $("#queryMsg").style.color = warns.length ? "#b36b00" : "#888";
+  $("#exportBtn").href = "/api/export?" + p;
 }
 
-function loadAll() { loadRuns(); loadBureaus(); queryData(); }
+function loadAll() { loadRuns(); loadBureaus(); loadFilters(); queryData(); }
+
+async function showAnalysis() {
+  const r = await fetch("/api/analysis?format=html");
+  $("#analysisFrame").srcdoc = await r.text();
+}
 
 $("#runBtn").onclick = runPipeline;
 $("#queryBtn").onclick = queryData;
+$("#analysisBtn").onclick = showAnalysis;
 loadAll();

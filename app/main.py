@@ -1,6 +1,8 @@
+import csv
+import io
 import os
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .store.db import init_db
@@ -9,6 +11,8 @@ from .discovery.registry import Registry
 from .extract.rule_extractor import load_rules
 from .fetch.client import HttpClient
 from .orchestrator import run_pipeline
+from .analysis.core import analyze
+from .analysis.report import render_html, render_markdown
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("STATS_DB", os.path.join(BASE_DIR, "data", "stats.db"))
@@ -50,13 +54,44 @@ def api_bureaus():
 
 @app.get("/api/data")
 def api_data(region: str = None, indicator: str = None, year: str = None):
-    return build_repo().query_data(region, indicator, year)
+    """宽容查询：输入「福建省莆田市/第一产业/2025年」也能命中。"""
+    return build_repo().query_lax(region, indicator, year)
+
+@app.get("/api/filters")
+def api_filters():
+    """查询候选：地区 / 指标 / 年份去重列表（供前端提示）。"""
+    repo = build_repo()
+    rows = repo.query_data()
+    regions, indicators, years = [], [], []
+    for r in rows:
+        if r.get("region") and r["region"] not in regions:
+            regions.append(r["region"])
+        if r.get("indicator_name") and r["indicator_name"] not in indicators:
+            indicators.append(r["indicator_name"])
+        if r.get("year") and r["year"] not in years:
+            years.append(r["year"])
+    return {"regions": sorted(regions), "indicators": sorted(indicators),
+            "years": sorted(years)}
 
 @app.get("/api/export")
-def api_export(region: str = None, year: str = None):
-    csv_text = build_repo().export_csv(region, year)
-    return PlainTextResponse(csv_text, media_type="text/csv",
+def api_export(region: str = None, indicator: str = None, year: str = None):
+    res = build_repo().query_lax(region, indicator, year)
+    rows = res["rows"]
+    out = io.StringIO()
+    if rows:
+        w = csv.DictWriter(out, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+    return PlainTextResponse(out.getvalue(), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=stats.csv"})
+
+@app.get("/api/analysis")
+def api_analysis(format: str = "html"):
+    result = analyze(build_repo())
+    if format == "md":
+        return PlainTextResponse(render_markdown(result),
+                                 media_type="text/markdown; charset=utf-8")
+    return HTMLResponse(render_html(result))
 
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "app", "web", "static"), html=True), name="static")
 

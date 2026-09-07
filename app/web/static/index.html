@@ -18,13 +18,24 @@
     <section id="data">
       <h2>数据</h2>
       <div id="filters">
-        <input id="fRegion" placeholder="地区，如 福建省">
-        <input id="fIndicator" placeholder="指标，如 地区生产总值">
-        <input id="fYear" placeholder="年份，如 2024">
+        <input id="fRegion" list="dlRegions" placeholder="地区，如 福建省 / 莆田">
+        <datalist id="dlRegions"></datalist>
+        <input id="fIndicator" list="dlIndicators" placeholder="指标，如 地区生产总值 / GDP">
+        <datalist id="dlIndicators"></datalist>
+        <input id="fYear" list="dlYears" placeholder="年份，如 2025">
+        <datalist id="dlYears"></datalist>
         <button id="queryBtn">查询</button>
         <a id="exportBtn" href="/api/export" download>导出 CSV</a>
       </div>
+      <p id="queryMsg" class="msg"></p>
       <table id="dataTable"><thead><tr></tr></thead><tbody></tbody></table>
+    </section>
+    <section id="analysis">
+      <h2>分析报告</h2>
+      <button id="analysisBtn">生成对比分析报告</button>
+      <a href="/api/analysis?format=md" target="_blank">查看 Markdown</a>
+      <iframe id="analysisFrame" title="分析报告"
+              style="width:100%;height:560px;border:1px solid #ddd;border-radius:6px"></iframe>
     </section>
   </main>
   <script src="/app.js"></script>
