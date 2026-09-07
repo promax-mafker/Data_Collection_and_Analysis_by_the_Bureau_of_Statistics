@@ -7,9 +7,20 @@ import re
 INDICATOR_ALIASES = {
     "gdp": "地区生产总值",
     "gross domestic product": "地区生产总值",
+    "第一产业": "第一产业增加值",
+    "第二产业": "第二产业增加值",
+    "第三产业": "第三产业增加值",
 }
 
 _YEAR_RE = re.compile(r"(\d{4})")
+
+# 地区名后缀可省略的行政字（核心名匹配用）
+_REGION_SUFFIX = ("省", "市")
+# 核心名（去掉省/市）之前允许出现的中文字：连接词/行政字，其余中文视为长词中段
+_REGION_OK_BEFORE = "省市的和与及、,，:： "
+# 句中若出现这些字却无地区命中，视为「给了无法识别的地区」
+# 注意不能含「区/地区」——「地区生产总值」等指标名会误触发
+_REGION_HINT = ("省", "市", "县", "自治")
 
 
 def _unique_or_warn(q, hits):
@@ -176,6 +187,107 @@ class Repository:
                ((region, region_q), (indicator, indicator_q), (year, year_q)) if q):
             return {"rows": [], "warnings": warnings}
         return {"rows": self.query_data(region, indicator, year), "warnings": warnings}
+
+    # ---------- 整句自然语言查询 ----------
+
+    def _candidates(self, column):
+        return [r[column] for r in self.conn.execute(
+            f"SELECT DISTINCT {column} FROM data_values "
+            f"WHERE {column} IS NOT NULL AND {column} != ''")]
+
+    def query_text(self, text):
+        """整句解析：从一句话里同时抽出地区/指标/年份后过滤。
+
+        规则：
+        - 地区：候选全名或去省/市后缀的核心名；多个命中时紧邻视为
+          「上级修饰下级」只保留最具体者，连接词分隔则分别保留。
+        - 指标：全名优先，别名兜底；「人均地区生产总值」等带人均前缀
+          的表述不误配总量指标。
+        - 年份：多个 4 位年份取最后出现。
+        - 地区词有线索却无法识别 → 警告并返回空，避免误导。
+        """
+        text = (text or "").strip()
+        warnings = []
+        if not text:
+            return {"rows": [], "warnings": ["请输入查询内容"], "matched": {}}
+        regions_all = self._candidates("region")
+        indicators_all = self._candidates("indicator_name")
+
+        # 1) 地区：全名 + 核心名（去掉 省/市）命中
+        hits = []  # (pos, end, region)
+        for c in regions_all:
+            i = text.find(c)
+            if i >= 0:
+                hits.append((i, i + len(c), c)); continue
+            core = c[:-1] if len(c) > 2 and c[-1] in _REGION_SUFFIX else None
+            if core:
+                j = text.find(core)
+                if j >= 0:
+                    before = text[j - 1:j]
+                    # 前导是中文但非连接/行政字 → 视为长词中段（如「福建师范大学」的福建）
+                    if not before or not ('\u4e00' <= before <= '\u9fff') or before in _REGION_OK_BEFORE:
+                        hits.append((j, j + len(core), c))
+        # 紧邻命中归组，组内取最具体（最后一个）
+        hits.sort(key=lambda h: (h[0], -h[1]))
+        groups = []
+        for h in hits:
+            if groups and h[0] == groups[-1][-1][1]:
+                groups[-1].append(h)
+            else:
+                groups.append([h])
+        regions = [g[-1][2] for g in groups]
+        region_hint = any(ch in text for ch in _REGION_HINT)
+        if not regions and region_hint:
+            warnings.append(f"无法识别地区「{text}」中的地市（候选：{'、'.join(regions_all)}）")
+
+        # 2) 指标：全名优先，别名兜底；防「人均」前缀误配
+        indicator = None
+        found_pos = None
+        for c in indicators_all:
+            i = text.find(c)
+            if i >= 0 and text[max(0, i - 2):i] != "人均":
+                indicator, found_pos = c, i
+                break
+        if indicator is None:
+            low = text.lower()
+            for alias, name in INDICATOR_ALIASES.items():
+                j = low.find(alias)
+                if j >= 0 and low[max(0, j - 2):j] != "人均" and name in indicators_all:
+                    indicator, found_pos = name, j
+                    break
+        if indicator is None:
+            warnings.append("未能识别指标（含人均/细分口径？候选：" +
+                            "、".join(indicators_all[:12]) + "）")
+
+        # 3) 年份：取最后出现的 4 位年份
+        years = _YEAR_RE.findall(text)
+        year = years[-1] if years else None
+        if len(set(years)) > 1:
+            warnings.append(f"句中出现多个年份（{'、'.join(dict.fromkeys(years))}），按最后一个 {year} 查询")
+
+        # 地区有线索却未识别 / 指标未识别 → 返回空（不误导）
+        if (region_hint and not regions) or indicator is None:
+            return {"rows": [], "warnings": warnings,
+                    "matched": {"regions": regions, "indicator": indicator, "year": year}}
+        if not regions:
+            # 无任何地区词 → 不限地区
+            rows = self.query_data(None, indicator, year)
+        else:
+            rows = self.query_data(regions[0], indicator, year) if len(regions) == 1 else self._query_in(
+                regions, indicator, year)
+        return {"rows": rows, "warnings": warnings,
+                "matched": {"regions": regions, "indicator": indicator, "year": year}}
+
+    def _query_in(self, regions, indicator, year):
+        marks = ",".join("?" * len(regions))
+        sql = f"SELECT * FROM data_values WHERE region IN ({marks})"
+        params = list(regions)
+        if indicator:
+            sql += " AND indicator_name=?"; params.append(indicator)
+        if year:
+            sql += " AND year=?"; params.append(year)
+        sql += " ORDER BY id"
+        return [dict(r) for r in self.conn.execute(sql, params)]
 
     def export_csv(self, region=None, year=None):
         rows = self.query_data(region=region, year=year)

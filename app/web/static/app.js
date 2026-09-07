@@ -40,12 +40,7 @@ async function loadFilters() {
   } catch (e) { /* 候选提示失败不影响查询 */ }
 }
 
-async function queryData() {
-  const p = new URLSearchParams();
-  if ($("#fRegion").value) p.set("region", $("#fRegion").value);
-  if ($("#fIndicator").value) p.set("indicator", $("#fIndicator").value);
-  if ($("#fYear").value) p.set("year", $("#fYear").value);
-  const d = await (await fetch("/api/data?" + p)).json();
+async function renderRows(d, qs) {
   const rows = d.rows || [];
   const cols = rows.length ? Object.keys(rows[0]) : [];
   document.querySelector("#dataTable thead tr").innerHTML =
@@ -53,13 +48,39 @@ async function queryData() {
   $("#dataTable tbody").innerHTML = rows.map(r =>
     `<tr>${cols.map(c => `<td>${r[c] ?? ""}</td>`).join("")}</tr>`).join("");
   const warns = d.warnings || [];
-  $("#queryMsg").textContent = warns.length
-    ? "提示：" + warns.join("；") : (rows.length ? "" : "（无匹配数据）");
-  $("#queryMsg").style.color = warns.length ? "#b36b00" : "#888";
-  $("#exportBtn").href = "/api/export?" + p;
+  const m = d.matched || {};
+  let matchedNote = "";
+  if (Object.keys(m).length && (m.regions?.length || m.indicator || m.year)) {
+    const parts = [];
+    if (m.regions?.length) parts.push("地区 " + m.regions.join("、"));
+    if (m.indicator) parts.push("指标 " + m.indicator);
+    if (m.year) parts.push("年份 " + m.year);
+    if (parts.length) matchedNote = "已识别：" + parts.join(" · ") + " → ";
+  }
+  $("#queryMsg").textContent = matchedNote + (warns.length
+    ? "提示：" + warns.join("；") : (rows.length ? "" : "（无匹配数据）"));
+  $("#queryMsg").style.color = (warns.length || (!rows.length && matchedNote)) ? "#b36b00" : "#888";
+  $("#exportBtn").href = "/api/export?" + qs;
 }
 
-function loadAll() { loadRuns(); loadBureaus(); loadFilters(); queryData(); }
+async function queryText() {
+  const v = $("#fText").value.trim();
+  if (!v) { queryAdvanced(); return; }
+  const p = new URLSearchParams({ text: v });
+  const d = await (await fetch("/api/data?" + p)).json();
+  await renderRows(d, p);
+}
+
+async function queryAdvanced() {
+  const p = new URLSearchParams();
+  if ($("#fRegion").value) p.set("region", $("#fRegion").value);
+  if ($("#fIndicator").value) p.set("indicator", $("#fIndicator").value);
+  if ($("#fYear").value) p.set("year", $("#fYear").value);
+  const d = await (await fetch("/api/data?" + p)).json();
+  await renderRows(d, p);
+}
+
+function loadAll() { loadRuns(); loadBureaus(); loadFilters(); queryText(); }
 
 async function showAnalysis() {
   const r = await fetch("/api/analysis?format=html");
@@ -67,6 +88,11 @@ async function showAnalysis() {
 }
 
 $("#runBtn").onclick = runPipeline;
-$("#queryBtn").onclick = queryData;
+$("#queryBtn").onclick = queryText;
+$("#queryAdvancedBtn").onclick = queryAdvanced;
+$("#fText").addEventListener("keydown", e => { if (e.key === "Enter") queryText(); });
+$("#fRegion").addEventListener("keydown", e => { if (e.key === "Enter") queryAdvanced(); });
+$("#fIndicator").addEventListener("keydown", e => { if (e.key === "Enter") queryAdvanced(); });
+$("#fYear").addEventListener("keydown", e => { if (e.key === "Enter") queryAdvanced(); });
 $("#analysisBtn").onclick = showAnalysis;
 loadAll();

@@ -53,9 +53,12 @@ def api_bureaus():
     return build_repo().list_bureaus()
 
 @app.get("/api/data")
-def api_data(region: str = None, indicator: str = None, year: str = None):
-    """宽容查询：输入「福建省莆田市/第一产业/2025年」也能命中。"""
-    return build_repo().query_lax(region, indicator, year)
+def api_data(region: str = None, indicator: str = None, year: str = None, text: str = None):
+    """数据查询：text 整句自然查询；否则三个精确条件（均走宽容解析）。"""
+    repo = build_repo()
+    if text:
+        return repo.query_text(text)
+    return repo.query_lax(region, indicator, year)
 
 @app.get("/api/filters")
 def api_filters():
@@ -74,8 +77,12 @@ def api_filters():
             "years": sorted(years)}
 
 @app.get("/api/export")
-def api_export(region: str = None, indicator: str = None, year: str = None):
-    res = build_repo().query_lax(region, indicator, year)
+def api_export(region: str = None, indicator: str = None, year: str = None, text: str = None):
+    repo = build_repo()
+    if text:
+        res = repo.query_text(text)
+    else:
+        res = repo.query_lax(region, indicator, year)
     rows = res["rows"]
     out = io.StringIO()
     if rows:

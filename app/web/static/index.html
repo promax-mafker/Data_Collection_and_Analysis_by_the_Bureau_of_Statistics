@@ -18,13 +18,20 @@
     <section id="data">
       <h2>数据</h2>
       <div id="filters">
-        <input id="fRegion" list="dlRegions" placeholder="地区，如 福建省 / 莆田">
-        <datalist id="dlRegions"></datalist>
-        <input id="fIndicator" list="dlIndicators" placeholder="指标，如 地区生产总值 / GDP">
-        <datalist id="dlIndicators"></datalist>
-        <input id="fYear" list="dlYears" placeholder="年份，如 2025">
-        <datalist id="dlYears"></datalist>
-        <button id="queryBtn">查询</button>
+        <div id="naturalQuery">
+          <input id="fText" placeholder="一句话查询，如：福建省莆田市2025年第一产业增加值，或：福州和厦门GDP">
+          <button id="queryBtn">查询</button>
+        </div>
+        <details id="advancedFilters">
+          <summary>高级筛选（地区 / 指标 / 年份）</summary>
+          <input id="fRegion" list="dlRegions" placeholder="地区，如 福建省 / 莆田">
+          <datalist id="dlRegions"></datalist>
+          <input id="fIndicator" list="dlIndicators" placeholder="指标，如 地区生产总值 / GDP">
+          <datalist id="dlIndicators"></datalist>
+          <input id="fYear" list="dlYears" placeholder="年份，如 2025">
+          <datalist id="dlYears"></datalist>
+          <button id="queryAdvancedBtn">按条件查询</button>
+        </details>
         <a id="exportBtn" href="/api/export" download>导出 CSV</a>
       </div>
       <p id="queryMsg" class="msg"></p>

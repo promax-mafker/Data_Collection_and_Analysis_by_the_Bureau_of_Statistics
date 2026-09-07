@@ -7,12 +7,15 @@ def _repo(tmp_path):
     return Repository(init_db(str(tmp_path / "t.db")))
 
 def _seed(repo):
-    """省 + 两市的多年数据（模拟真实库）。"""
+    """省 + 两市的多指标数据（模拟真实库）。"""
     rows = [
         DataValue(None, None, "福建省", "2025", "地区生产总值", "60199.72", "亿元", "综合", "…"),
+        DataValue(None, None, "福建省", "2025", "第一产业增加值", "3000.5", "亿元", "综合", "…"),
+        DataValue(None, None, "福建省", "2024", "地区生产总值", "58000.0", "亿元", "综合", "…"),
         DataValue(None, None, "莆田市", "2025", "第一产业增加值", "158.35", "亿元", "综合", "第一产业增加值 158.35 亿元"),
         DataValue(None, None, "莆田市", "2024", "第一产业增加值", "150.2", "亿元", "综合", "…"),
         DataValue(None, None, "福州市", "2025", "第一产业增加值", "600.1", "亿元", "综合", "…"),
+        DataValue(None, None, "厦门市", "2025", "第一产业增加值", "50.5", "亿元", "综合", "…"),
         DataValue(None, None, "厦门市", "2024", "第二产业增加值", "1800.0", "亿元", "综合", "…"),
     ]
     assert repo.insert_values(rows) == len(rows)
@@ -100,4 +103,82 @@ def test_no_filters_returns_all(tmp_path):
     repo = _repo(tmp_path); _seed(repo)
     out = _lax(repo)
     assert out["warnings"] == []
-    assert len(out["rows"]) == 5
+    assert len(out["rows"]) == 8
+
+# ---------- 整句自然语言查询 ----------
+
+def test_text_whole_sentence(tmp_path):
+    """「福建省莆田市2025年第一产业增加值」一句话命中。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("福建省莆田市2025年第一产业增加值")
+    assert out["warnings"] == []
+    rows = out["rows"]
+    assert len(rows) == 1
+    assert rows[0]["region"] == "莆田市"
+    assert rows[0]["year"] == "2025"
+    assert rows[0]["indicator_name"] == "第一产业增加值"
+    assert rows[0]["value"] == "158.35"
+
+def test_text_mixed_order_and_suffix(tmp_path):
+    """打乱顺序、省略后缀的整句也应命中。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("2025年莆田市第一产业增加值是多少")
+    assert out["warnings"] == []
+    assert {r["value"] for r in out["rows"]} == {"158.35"}
+
+def test_text_province_and_city_parallel(tmp_path):
+    """「福建省和莆田市…」并列：省与市都返回。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("福建省和莆田市2025年第一产业增加值")
+    assert out["warnings"] == []
+    assert {r["region"] for r in out["rows"]} == {"福建省", "莆田市"}
+
+def test_text_two_regions_parallel(tmp_path):
+    """「福州和厦门2025第一产业」→ 两市都返回（后缀补全）。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("福州和厦门2025年第一产业")
+    assert out["warnings"] == []
+    assert {r["region"] for r in out["rows"]} == {"福州市", "厦门市"}
+
+def test_text_region_fuzzy_inside(tmp_path):
+    """「福州市和厦门市」这类多个地区的表述应分别解析。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("福州市和厦门市2025年第一产业")
+    assert {r["region"] for r in out["rows"]} == {"福州市", "厦门市"}
+
+def test_text_unknown_region_warns(tmp_path):
+    """句中含「市」却无法识别（不存在市）→ 空 + 警告。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("不存在市2025年第一产业增加值")
+    assert out["rows"] == []
+    assert any("不存在市" in w or "地区" in w for w in out["warnings"])
+
+def test_text_no_region_returns_all(tmp_path):
+    """句中无地区词（如只问指标+年份）→ 不限地区返回该指标。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("2025年第一产业增加值")
+    assert out["warnings"] == []
+    assert {r["region"] for r in out["rows"]} == {"福建省", "莆田市", "福州市", "厦门市"}
+
+def test_text_renjun_gdp_not_confused(tmp_path):
+    """「人均地区生产总值」不能误配成「地区生产总值」。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("福建省2025年人均地区生产总值")
+    assert out["rows"] == []
+    assert any("人均" in w or "指标" in w for w in out["warnings"])
+
+def test_text_gdp_alias(tmp_path):
+    """GDP 别名命中地区生产总值。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("福建省2025年GDP")
+    assert out["rows"]
+    assert {r["indicator_name"] for r in out["rows"]} == {"地区生产总值"}
+    assert {r["region"] for r in out["rows"]} == {"福建省"}
+
+def test_text_multi_years_takes_last(tmp_path):
+    """句中多个年份 → 取最后出现 + 警告。"""
+    repo = _repo(tmp_path); _seed(repo)
+    out = repo.query_text("福建省2024年2025年地区生产总值")
+    assert out["rows"]
+    assert {r["year"] for r in out["rows"]} == {"2025"}
+    assert any("2024" in w for w in out["warnings"])
