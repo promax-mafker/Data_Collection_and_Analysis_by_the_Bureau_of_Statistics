@@ -46,10 +46,10 @@ def growth_contribution(repo, metric="企业单位数（个）") -> dict:
     return out
 
 
-def _plan_industries(repo):
-    """从 doc_insights kind=industry 提取规划产业 → {name: plan_role}。"""
+def _plan_industries(repo, region="泉州市"):
+    """从 doc_insights kind=industry 提取规划产业 → {name: plan_role}（限定 region）。"""
     out = {}
-    for r in repo.list_doc_insights(kind="industry"):
+    for r in repo.list_doc_insights(kind="industry", region=region):
         try:
             body = json.loads(r["body"])
         except (ValueError, TypeError):
@@ -140,9 +140,9 @@ def industry_gap(repo, thresholds=None) -> list:
     return gaps
 
 
-def _evidence(industry, repo):
-    """取该产业的规划 evidence 或实际数据 raw_text 作溯源。"""
-    for r in repo.list_doc_insights(kind="industry"):
+def _evidence(industry, repo, region="泉州市"):
+    """取该产业的规划 evidence 或实际数据 raw_text 作溯源（限定 region）。"""
+    for r in repo.list_doc_insights(kind="industry", region=region):
         try:
             body = json.loads(r["body"])
         except (ValueError, TypeError):

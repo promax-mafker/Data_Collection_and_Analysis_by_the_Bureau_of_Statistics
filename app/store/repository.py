@@ -141,23 +141,50 @@ class Repository:
         row = self.conn.execute("SELECT id FROM pages WHERE content_hash=?", (content_hash,)).fetchone()
         return row["id"] if row else None
 
-    def insert_values(self, values) -> int:
+    def find_bureau_by_region(self, region) -> int:
+        """按 region 查机构 id；无则 None（M7a: 归属不再硬编码）。"""
+        row = self.conn.execute(
+            "SELECT id FROM bureaus WHERE region=? ORDER BY id LIMIT 1", (region,)).fetchone()
+        return row["id"] if row else None
+
+    def _insert_values(self, values) -> int:
+        """逐条插入 data_values（不 commit，供单事务调用）。"""
         n = 0
         for v in values:
             self.conn.execute(
-                "INSERT INTO data_values (page_id, bureau_id, region, year, indicator_name, value, unit, category, raw_text, method) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (v.page_id, v.bureau_id, v.region, v.year, v.indicator_name, v.value, v.unit, v.category, v.raw_text, v.method))
+                "INSERT INTO data_values (page_id, bureau_id, region, year, indicator_name, value, unit, category, raw_text, method, caliber, source_url) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (v.page_id, v.bureau_id, v.region, v.year, v.indicator_name, v.value,
+                 v.unit, v.category, v.raw_text, v.method, v.caliber, v.source_url))
             n += 1
-        self.conn.commit()
         return n
 
-    def replace_page_values(self, page_id, values) -> int:
-        """整页替换指标值：先删该页旧值再插入（页面修订时避免版本累积）。"""
-        self.conn.execute("DELETE FROM data_values WHERE page_id=?", (page_id,))
-        return self.insert_values(values)
+    def insert_values(self, values) -> int:
+        try:
+            n = self._insert_values(values)
+            self.conn.commit()
+            return n
+        except Exception:
+            self.conn.rollback()
+            raise
 
-    def query_data(self, region=None, indicator=None, year=None):
+    def replace_page_values(self, page_id, values, force=False) -> int:
+        """整页替换指标值：单事务 DELETE+INSERT。
+
+        M7a 护栏：values 为空且非 force → 不删旧值返回 0（防"空解析抹库"）。
+        """
+        if not values and not force:
+            return 0
+        try:
+            self.conn.execute("DELETE FROM data_values WHERE page_id=?", (page_id,))
+            self._insert_values(values)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return len(values)
+
+    def query_data(self, region=None, indicator=None, year=None, caliber=None):
         sql = "SELECT * FROM data_values WHERE 1=1"
         params = []
         if region:
@@ -166,10 +193,12 @@ class Repository:
             sql += " AND indicator_name=?"; params.append(indicator)
         if year:
             sql += " AND year=?"; params.append(year)
+        if caliber:
+            sql += " AND caliber=?"; params.append(caliber)
         sql += " ORDER BY id"
         return [dict(r) for r in self.conn.execute(sql, params)]
 
-    def query_lax(self, region_q=None, indicator_q=None, year_q=None):
+    def query_lax(self, region_q=None, indicator_q=None, year_q=None, caliber=None):
         """宽容查询：自然语言输入 → 库内精确过滤。
 
         任一条件给出但无法解析（未识别/歧义）时返回空行并附 warnings，
@@ -192,7 +221,7 @@ class Repository:
         if any(x is None for x, q in
                ((region, region_q), (indicator, indicator_q), (year, year_q)) if q):
             return {"rows": [], "warnings": warnings}
-        return {"rows": self.query_data(region, indicator, year), "warnings": warnings}
+        return {"rows": self.query_data(region, indicator, year, caliber), "warnings": warnings}
 
     # ---------- 整句自然语言查询 ----------
 
@@ -201,7 +230,7 @@ class Repository:
             f"SELECT DISTINCT {column} FROM data_values "
             f"WHERE {column} IS NOT NULL AND {column} != ''")]
 
-    def query_text(self, text):
+    def query_text(self, text, caliber=None):
         """整句解析：从一句话里同时抽出地区/指标/年份后过滤。
 
         规则：
@@ -277,14 +306,14 @@ class Repository:
                     "matched": {"regions": regions, "indicator": indicator, "year": year}}
         if not regions:
             # 无任何地区词 → 不限地区
-            rows = self.query_data(None, indicator, year)
+            rows = self.query_data(None, indicator, year, caliber)
         else:
-            rows = self.query_data(regions[0], indicator, year) if len(regions) == 1 else self._query_in(
-                regions, indicator, year)
+            rows = self.query_data(regions[0], indicator, year, caliber) if len(regions) == 1 else self._query_in(
+                regions, indicator, year, caliber)
         return {"rows": rows, "warnings": warnings,
                 "matched": {"regions": regions, "indicator": indicator, "year": year}}
 
-    def _query_in(self, regions, indicator, year):
+    def _query_in(self, regions, indicator, year, caliber=None):
         marks = ",".join("?" * len(regions))
         sql = f"SELECT * FROM data_values WHERE region IN ({marks})"
         params = list(regions)
@@ -292,6 +321,8 @@ class Repository:
             sql += " AND indicator_name=?"; params.append(indicator)
         if year:
             sql += " AND year=?"; params.append(year)
+        if caliber:
+            sql += " AND caliber=?"; params.append(caliber)
         sql += " ORDER BY id"
         return [dict(r) for r in self.conn.execute(sql, params)]
 
@@ -324,26 +355,48 @@ class Repository:
 
     # ---------- M5: doc_insights / enterprises ----------
 
-    def insert_doc_insights(self, items) -> int:
-        """items: list[dict(page_id, source_id, kind, title, body, method)]，body 为 JSON 字符串。"""
+    def _insert_doc_insights(self, items) -> int:
+        """插入洞察（不 commit）；items 可含 region/period。"""
         n = 0
         for it in items:
             self.conn.execute(
-                "INSERT INTO doc_insights (page_id, source_id, kind, title, body, method) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO doc_insights (page_id, source_id, kind, title, body, method, region, period) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (it.get("page_id"), it.get("source_id"), it.get("kind"),
-                 it.get("title", ""), it.get("body", ""), it.get("method", "llm")))
+                 it.get("title", ""), it.get("body", ""), it.get("method", "llm"),
+                 it.get("region", ""), it.get("period", "")))
             n += 1
-        self.conn.commit()
         return n
 
-    def replace_doc_insights(self, page_id, items) -> int:
-        """整页替换：先删该页旧洞察再插入（页面刷新防版本累积）。"""
-        self.conn.execute("DELETE FROM doc_insights WHERE page_id=?", (page_id,))
-        for it in items:
-            it["page_id"] = page_id
-        return self.insert_doc_insights(items)
+    def insert_doc_insights(self, items) -> int:
+        """items: list[dict(page_id, source_id, kind, title, body, method, region?, period?)]。"""
+        try:
+            n = self._insert_doc_insights(items)
+            self.conn.commit()
+            return n
+        except Exception:
+            self.conn.rollback()
+            raise
 
-    def list_doc_insights(self, page_id=None, kind=None):
+    def replace_doc_insights(self, page_id, items, force=False) -> int:
+        """整页替换洞察：单事务 DELETE+INSERT（页面刷新防版本累积）。
+
+        M7a 护栏：items 为空且非 force → 不删旧行返回 0（LLM 失败不清空旧洞察）。
+        """
+        if not items and not force:
+            return 0
+        try:
+            self.conn.execute("DELETE FROM doc_insights WHERE page_id=?", (page_id,))
+            for it in items:
+                it["page_id"] = page_id
+            self._insert_doc_insights(items)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return len(items)
+
+    def list_doc_insights(self, page_id=None, kind=None, region=None):
         sql = "SELECT * FROM doc_insights WHERE 1=1"
         params = []
         if page_id:
@@ -352,20 +405,29 @@ class Repository:
         if kind:
             sql += " AND kind=?"
             params.append(kind)
+        if region:
+            sql += " AND region=?"
+            params.append(region)
         sql += " ORDER BY id"
         return [dict(r) for r in self.conn.execute(sql, params)]
 
-    def replace_enterprises(self, page_id, rows) -> int:
-        """rows: list[dict(year, list_type, name, county, rank)]；整页替换。"""
-        self.conn.execute("DELETE FROM enterprises WHERE page_id=?", (page_id,))
-        n = 0
-        for r in rows:
-            self.conn.execute(
-                "INSERT INTO enterprises (page_id, year, list_type, name, county, rank) VALUES (?,?,?,?,?,?)",
-                (page_id, r.get("year"), r.get("list_type", ""), r.get("name"),
-                 r.get("county", ""), r.get("rank", "")))
-            n += 1
-        self.conn.commit()
+    def replace_enterprises(self, page_id, rows, force=False) -> int:
+        """rows: list[dict(year, list_type, name, county, rank)]；整页替换（单事务）。"""
+        if not rows and not force:
+            return 0
+        try:
+            self.conn.execute("DELETE FROM enterprises WHERE page_id=?", (page_id,))
+            n = 0
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO enterprises (page_id, year, list_type, name, county, rank) VALUES (?,?,?,?,?,?)",
+                    (page_id, r.get("year"), r.get("list_type", ""), r.get("name"),
+                     r.get("county", ""), r.get("rank", "")))
+                n += 1
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         return n
 
     def list_enterprises(self, year=None, list_type=None):
@@ -382,18 +444,24 @@ class Repository:
 
     # ---------- M6: industry_data / econ_series / enterprise_industry ----------
 
-    def replace_industry_data(self, source, rows) -> int:
-        """rows: list[dict(industry, year, metric, value, unit, raw_text)]；按 source 整批替换。"""
-        self.conn.execute("DELETE FROM industry_data WHERE source=?", (source,))
-        n = 0
-        for r in rows:
-            self.conn.execute(
-                "INSERT INTO industry_data (source, industry, year, metric, value, unit, raw_text) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (source, r.get("industry", ""), r.get("year", ""), r.get("metric", ""),
-                 r.get("value", ""), r.get("unit", ""), r.get("raw_text", "")))
-            n += 1
-        self.conn.commit()
+    def replace_industry_data(self, source, rows, force=False) -> int:
+        """rows: list[dict(industry, year, metric, value, unit, raw_text)]；按 source 整批替换（单事务）。"""
+        if not rows and not force:
+            return 0
+        try:
+            self.conn.execute("DELETE FROM industry_data WHERE source=?", (source,))
+            n = 0
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO industry_data (source, industry, year, metric, value, unit, raw_text) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (source, r.get("industry", ""), r.get("year", ""), r.get("metric", ""),
+                     r.get("value", ""), r.get("unit", ""), r.get("raw_text", "")))
+                n += 1
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         return n
 
     def list_industry_data(self, source=None, industry=None, metric=None):
@@ -411,18 +479,24 @@ class Repository:
         sql += " ORDER BY id"
         return [dict(r) for r in self.conn.execute(sql, params)]
 
-    def replace_econ_series(self, source, rows) -> int:
-        """rows: list[dict(indicator, year, value, unit, note, raw_text)]；按 source 整批替换。"""
-        self.conn.execute("DELETE FROM econ_series WHERE source=?", (source,))
-        n = 0
-        for r in rows:
-            self.conn.execute(
-                "INSERT INTO econ_series (source, indicator, year, value, unit, note, raw_text) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (source, r.get("indicator", ""), r.get("year", ""), r.get("value", ""),
-                 r.get("unit", ""), r.get("note", ""), r.get("raw_text", "")))
-            n += 1
-        self.conn.commit()
+    def replace_econ_series(self, source, rows, force=False) -> int:
+        """rows: list[dict(indicator, year, value, unit, note, raw_text)]；按 source 整批替换（单事务）。"""
+        if not rows and not force:
+            return 0
+        try:
+            self.conn.execute("DELETE FROM econ_series WHERE source=?", (source,))
+            n = 0
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO econ_series (source, indicator, year, value, unit, note, raw_text) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (source, r.get("indicator", ""), r.get("year", ""), r.get("value", ""),
+                     r.get("unit", ""), r.get("note", ""), r.get("raw_text", "")))
+                n += 1
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         return n
 
     def list_econ_series(self, source=None, indicator=None):
@@ -439,14 +513,18 @@ class Repository:
 
     def replace_enterprise_industry(self, rows) -> int:
         """rows: list[dict(enterprise_id, industry, method)]；按 id upsert。"""
-        n = 0
-        for r in rows:
-            self.conn.execute(
-                "INSERT INTO enterprise_industry (enterprise_id, industry, method) VALUES (?,?,?) "
-                "ON CONFLICT(enterprise_id) DO UPDATE SET industry=excluded.industry, method=excluded.method",
-                (r.get("enterprise_id"), r.get("industry", ""), r.get("method", "")))
-            n += 1
-        self.conn.commit()
+        try:
+            n = 0
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO enterprise_industry (enterprise_id, industry, method) VALUES (?,?,?) "
+                    "ON CONFLICT(enterprise_id) DO UPDATE SET industry=excluded.industry, method=excluded.method",
+                    (r.get("enterprise_id"), r.get("industry", ""), r.get("method", "")))
+                n += 1
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         return n
 
     def list_enterprise_industry(self):

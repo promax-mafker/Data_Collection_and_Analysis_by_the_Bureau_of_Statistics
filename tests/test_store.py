@@ -121,3 +121,83 @@ def test_enterprise_industry_crud(tmp_path):
     assert repo.replace_enterprise_industry([{"enterprise_id": 1, "industry": "纺织鞋服", "method": "rule"}]) == 1
     got2 = {r["enterprise_id"]: r["industry"] for r in repo.list_enterprise_industry()}
     assert got2[1] == "纺织鞋服"
+
+
+# ---------- M7a: caliber/事务/空不删/region ----------
+
+def _mk_value(indicator="地区生产总值", value="100", year="2024", **kw):
+    return DataValue(page_id=7, bureau_id=1, region="泉州市", year=year,
+                     indicator_name=indicator, value=value, unit="亿元",
+                     category="综合", raw_text=f"{indicator}{value}亿元", **kw)
+
+
+def test_data_value_has_caliber_fields_and_persist(tmp_path):
+    repo = _repo(tmp_path)
+    v = _mk_value(caliber="budget", source_url="http://x/budget")
+    repo.insert_values([v])
+    row = repo.query_data(region="泉州市")[0]
+    assert row["caliber"] == "budget"
+    assert row["source_url"] == "http://x/budget"
+
+
+def test_query_data_caliber_filter(tmp_path):
+    repo = _repo(tmp_path)
+    repo.insert_values([_mk_value(caliber="final"), _mk_value(indicator="税收收入",
+                                                              value="5", caliber="budget")])
+    assert len(repo.query_data(region="泉州市", caliber="final")) == 1
+    assert len(repo.query_data(region="泉州市")) == 2
+
+
+def test_replace_values_empty_keeps_old(tmp_path):
+    repo = _repo(tmp_path)
+    repo.insert_values([_mk_value()])
+    assert repo.replace_page_values(7, []) == 0
+    assert len(repo.query_data(region="泉州市")) == 1  # 旧值未被空结果抹掉
+
+
+def test_replace_values_empty_force_clears(tmp_path):
+    repo = _repo(tmp_path)
+    repo.insert_values([_mk_value()])
+    assert repo.replace_page_values(7, [], force=True) == 0
+    assert len(repo.query_data(region="泉州市")) == 0
+
+
+def test_replace_values_transaction_rollback(tmp_path):
+    repo = _repo(tmp_path)
+    repo.insert_values([_mk_value()])
+    # 第二个元素是 dict 而非 DataValue：_insert_values 访问 v.page_id 时抛 AttributeError
+    bad = _mk_value(value="200")
+    try:
+        repo.replace_page_values(7, [bad, {"not": "a datavalue"}])
+        assert False, "应抛出异常"
+    except AttributeError:
+        pass
+    # 回滚后旧行仍在、首个新值(200)也未落
+    rows = repo.query_data(region="泉州市")
+    assert len(rows) == 1 and rows[0]["value"] == "100"
+
+
+def test_replace_doc_insights_empty_keeps_old(tmp_path):
+    repo = _repo(tmp_path)
+    items = [{"page_id": 3, "kind": "industry", "title": "t", "body": "{}"}]
+    assert repo.replace_doc_insights(3, items) == 1
+    assert repo.replace_doc_insights(3, []) == 0
+    assert len(repo.list_doc_insights(page_id=3)) == 1  # 旧洞察保留
+
+
+def test_list_doc_insights_region_filter(tmp_path):
+    repo = _repo(tmp_path)
+    repo.insert_doc_insights([
+        {"page_id": 1, "kind": "industry", "title": "泉州", "body": "{}", "region": "泉州市"},
+        {"page_id": 1, "kind": "industry", "title": "漳州", "body": "{}", "region": "漳州市"},
+    ])
+    rows = repo.list_doc_insights(kind="industry", region="泉州市")
+    assert len(rows) == 1 and rows[0]["title"] == "泉州"
+
+
+def test_find_bureau_by_region(tmp_path):
+    repo = _repo(tmp_path)
+    bid = repo.upsert_bureau(Bureau(level="city", name="泉州市统计局",
+                                    url="http://qz/", region="泉州市"))
+    assert repo.find_bureau_by_region("泉州市") == bid
+    assert repo.find_bureau_by_region("莆田市") is None

@@ -46,7 +46,8 @@ def main():
     stats = run_documents(client, repo, sources, llm_client=llm, region=region)
     print(f"采集完成: pages={stats['pages']} values={stats['values']} "
           f"insights={stats['insights']} enterprises={stats['enterprises']} "
-          f"errors={stats['errors']}")
+          f"errors={stats['errors']} llm_errors={stats.get('llm_errors', 0)} "
+          f"critiques={stats.get('critiques', 0)}")
 
     if "--sources-only" in sys.argv:
         return

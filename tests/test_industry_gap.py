@@ -24,14 +24,14 @@ def _seed_industry_data(repo):
 
 
 def _seed_plan(repo):
-    """规划产业（doc_insights kind=industry）。"""
+    """规划产业（doc_insights kind=industry，泉州 region）。"""
     repo.insert_doc_insights([
         {"page_id": 1, "source_id": "plan_15", "kind": "industry", "title": "x",
          "body": json.dumps({"industries": [
              {"industry": "纺织鞋服", "plan_role": "支柱", "evidence": "e1"},
              {"industry": "机械装备", "plan_role": "支柱", "evidence": "e2"},
              {"industry": "健康食品", "plan_role": "新兴", "evidence": "e3"}]}, ensure_ascii=False),
-         "method": "llm"},
+         "method": "llm", "region": "泉州市", "period": "2026"},
     ])
 
 
@@ -89,12 +89,28 @@ def test_silent_pillar(tmp_path):
         {"page_id": 1, "source_id": "plan_15", "kind": "industry", "title": "x",
          "body": json.dumps({"industries": [
              {"industry": "纺织鞋服", "plan_role": "支柱", "evidence": "e1"}]}, ensure_ascii=False),
-         "method": "llm"},
+         "method": "llm", "region": "泉州市", "period": "2026"},
     ])
     _seed_enterprise_industry(repo)
     gaps = industry_gap(repo, thresholds={"weak_share": 5.0, "strong_share": 8.0})
     by_name = {g["industry"]: g for g in gaps}
     assert by_name["电子信息"]["verdict"] == "silent_pillar"
+
+
+def test_industry_gap_plan_region_isolation(tmp_path):
+    """industry_gap 只读泉州规划洞察：外市 kind=industry 不进入错配判断。"""
+    repo = _repo(tmp_path)
+    _seed_industry_data(repo)
+    repo.insert_doc_insights([
+        {"page_id": 2, "source_id": "zz", "kind": "industry", "title": "漳州规划",
+         "body": json.dumps({"industries": [
+             {"industry": "石化基地", "plan_role": "支柱", "evidence": "e"}]}, ensure_ascii=False),
+         "method": "llm", "region": "漳州市", "period": "2026"},
+    ])
+    _seed_enterprise_industry(repo)
+    gaps = industry_gap(repo)
+    names = {g["industry"] for g in gaps}
+    assert "石化基地" not in names  # 漳州规划不进入泉州错配矩阵
 
 
 def test_gap_has_evidence(tmp_path):

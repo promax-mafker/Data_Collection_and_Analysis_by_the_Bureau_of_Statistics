@@ -35,3 +35,5 @@ class DataValue:
     category: str
     raw_text: str
     method: str = "rule"
+    caliber: str = "final"        # final=决算/公报 / budget=预算执行口径 / flash=快报
+    source_url: str = ""

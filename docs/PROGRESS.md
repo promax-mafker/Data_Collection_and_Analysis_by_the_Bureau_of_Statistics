@@ -29,6 +29,7 @@
 | M5 泉州纵深画像 | ✅ 完成 | 政府公开文件全家桶：规划/报告/预决算/企业名录；LLM 抽取+批判审读+数理分析（详见 §4.5） |
 | M6 经济驱动画像 | ✅ 完成 | 实际产业结构错配 + 三驾马车(消费/债务投资/出口) + Kami Parchment 报告（详见 §4.6） |
 | M7 二期规划 | ⏳ 未开始 | 见 §6 |
+| M7a 管线鲁棒性 P0 | ✅ 完成 | 对抗性审查 → P0 修复：单值化/口径/事务/白名单/批判接线/region 隔离/数据清理（详见 §4.7） |
 
 ## 3. 当前能力清单（已验证）
 
@@ -161,6 +162,23 @@
 - 债务正则锚定「债务余额预计执行数/中央核定的限额」，避免「新增限额 348.01」误配
 - 测试 127 → 166；真实采集 series=383、industry_data=945、enterprises=170、errors=0
 
+### §4.7 M7a 管线鲁棒性 P0(2026-09-08)
+
+**触发**：全链路对抗性审查（`docs/REVIEW_PIPELINE_ROBUSTNESS.md`，第一性原理 + 真实库实测 + 双子代理专项）→ A/B 级发现：枚举式抽取重复入库、口径年份混装、空结果抹库、非事务替换、LLM 批判双层死代码、洞察无 region、硬编码 bureau_id、.doc 静默吞错。
+
+**已交付**（设计 `docs/DESIGN_M7_ROBUSTNESS.md`、计划 `docs/PLAN_M7A_ROBUSTNESS.md`，TDD 逐任务红绿）：
+| 项 | 变更 |
+|---|---|
+| 抽取单值化 | `rule_extractor`：`normalize_value`(全角/千分位/空格) + `_main_caliber_score` 主口径收敛 + %-占比误配排除 + 跨章节 `_converge_values` |
+| 口径维度 | `data_values` +`caliber`(final/budget)/`source_url`；迁移幂等回填；**分析层默认只吃 final**(2026 预算行自动隔离) |
+| 替换护栏 | 全部 `replace_*` 单事务+rollback；**空结果不删旧**(force 显式清空)；SQLite WAL/busy_timeout/外键 |
+| 类型白名单 | `.doc/.xls` 等扩展名显式报错；PDF 文本<80 字判扫描版报错；bureau 归属按 region 查库/自建 meta（删除硬编码 id=1） |
+| 批判双层接线 | `llm_critique` 每源落库 kind='critique'；SYSTEM_CRITIQUE +subject；`merge_checks` 同义归一 + 高置信单层升级；失败改上抛由调用方计数；`llm_errors/critiques` 统计 |
+| region 隔离 | `doc_insights` +region/period；5 处分析调用点过滤（泉州画像/industry_gap 不再可能串染外市洞察） |
+| 数据清理 | `scripts/cleanup_m7a.py`（备份 `stats.db.bak-20260908`，幂等）：取证删 9 行（宁德子口径/占比误配、三明断行残片、泉州海关代征税收）+ 完全重复 43 行；data_values 742→690；泉州 2026 三行 caliber=budget |
+
+**验证**：测试 166 → **206 passed**（新增 40：迁移/事务/单值化/批判/region/清理）；真实库清理后抽查全部符合预期；API 冒烟 `/api/data?text=泉州税收收入2025` 仅返回 814.34(final)，2026 预算行带 caliber=budget。
+
 ## 5. 已知限制 / 技术债
 
 | 类别 | 说明 | 影响 |
@@ -189,7 +207,7 @@
 
 ```bash
 cd E:\Deepseek_harness\stats-collector
-.venv\Scripts\python -m pytest -q          # 确认 166 passed
+.venv\Scripts\python -m pytest -q          # 确认 206 passed
 .venv\Scripts\python run.py                 # 一键采集统计公报（网络抖动漏检可重跑）
 .venv\Scripts\python run.py analyze         # 生成 data/reports/report.html（全省横比）
 .venv\Scripts\python quanzhou.py            # 泉州纵深画像（采集+LLM+分析+报告）

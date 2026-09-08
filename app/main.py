@@ -142,8 +142,10 @@ def api_quanzhou_status():
     return {
         "pages": by_cat,
         "doc_insights": len(repo.list_doc_insights()),
+        "critiques": len(repo.list_doc_insights(kind="critique", region="泉州市")),
         "enterprises": len(repo.list_enterprises()),
-        "fiscal_values": len(repo.query_data(region="泉州市", indicator="地方一般公共预算收入")),
+        "fiscal_values": len(repo.query_data(region="泉州市", indicator="一般公共预算收入",
+                                             caliber="final")),
         "llm_enabled": LLMClient().enabled,
     }
 
