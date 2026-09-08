@@ -132,3 +132,60 @@ def test_merge_upgrades_double_hit():
     merged2 = merge_checks(checks, critiques2)
     assert len(merged2["escalated"]) == 1
     assert merged2["escalated"][0]["severity"] == "high"
+
+
+# ---------- M7a: subject 打通与高置信单层升级 ----------
+
+def test_system_critique_asks_subject():
+    from app.extract.critique import SYSTEM_CRITIQUE
+    assert "subject" in SYSTEM_CRITIQUE
+
+
+def test_llm_critique_shape_has_subject():
+    fake = FakeCritic({"critiques": [
+        {"type": "metric_game", "severity": "high", "subject": "GDP增速",
+         "claim": "增长6%", "reality": "名义增速", "what_to_check": "实际增速",
+         "confidence": "high", "evidence": "全年增长6%"},
+    ]})
+    out = llm_critique("原文", fake)
+    assert out[0]["subject"] == "GDP增速"
+
+
+def test_llm_critique_missing_subject_defaults_empty():
+    fake = FakeCritic({"critiques": [
+        {"type": "spin", "severity": "low", "claim": "历史新高",
+         "reality": "r", "what_to_check": "w", "confidence": "low"},
+    ]})
+    out = llm_critique("原文", fake)
+    assert out[0]["subject"] == ""
+
+
+def test_merge_subject_synonym_upgrades():
+    """批判说 'GDP增速'、规则主题 '地区生产总值' → 归一后同主题升级。"""
+    checks = [{"id": "C3", "subject": "地区生产总值", "year": "2025",
+               "verdict": "flag", "severity": "med", "note": "突变"}]
+    critiques = [{"type": "metric_game", "severity": "low",
+                  "subject": "GDP增速", "evidence": "e"}]
+    merged = merge_checks(checks, critiques)
+    assert len(merged["escalated"]) == 1
+    assert merged["escalated"][0]["severity"] == "high"
+
+
+def test_merge_high_conf_single_layer_escalates():
+    """批判无 subject 但 confidence=high 且规则 flag → 单层也进升级区（防漏报）。"""
+    checks = [{"id": "C6", "subject": "土地财政依赖度", "year": "2025",
+               "verdict": "flag", "severity": "high", "note": "依赖 45%"}]
+    critiques = [{"type": "omission", "severity": "low", "confidence": "high",
+                  "claim": "未披露土地出让下滑", "evidence": "e"}]
+    merged = merge_checks(checks, critiques)
+    assert len(merged["escalated"]) == 1
+    assert merged["escalated"][0]["single_layer"] is True
+
+
+def test_merge_no_subject_low_conf_no_escalate():
+    checks = [{"id": "C3", "subject": "GDP", "year": "2025", "verdict": "flag",
+               "severity": "med", "note": "突变"}]
+    critiques = [{"type": "spin", "severity": "low", "confidence": "med",
+                  "claim": "c", "evidence": "e"}]
+    merged = merge_checks(checks, critiques)
+    assert merged["escalated"] == []

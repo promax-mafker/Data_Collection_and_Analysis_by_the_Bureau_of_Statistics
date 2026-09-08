@@ -21,9 +21,12 @@ def _num(v):
         return None
 
 
-def _value(repo, indicator, year=None, region=None):
-    """返回 (数值, unit)；缺失返回 (None, '')。region 给定则限定地域。"""
-    rows = repo.query_data(indicator=indicator, region=region)
+def _value(repo, indicator, year=None, region=None, caliber="final"):
+    """返回 (数值, unit)；缺失返回 (None, '')。region 给定则限定地域。
+
+    M7a: 默认只吃 final 口径（决算/公报），预算执行口径(budget)不冒充年度值。
+    """
+    rows = repo.query_data(indicator=indicator, region=region, caliber=caliber)
     if year:
         rows = [r for r in rows if r.get("year") == year]
     if not rows:
@@ -32,10 +35,10 @@ def _value(repo, indicator, year=None, region=None):
     return v, rows[0].get("unit", "")
 
 
-def _year_pair(repo, indicator, region=None):
-    """指标按年份升序 → [(year, float)]。"""
+def _year_pair(repo, indicator, region=None, caliber="final"):
+    """指标按年份升序 → [(year, float)]（只吃 final 口径，防子年度混入跨年计算）。"""
     out = []
-    for r in repo.query_data(indicator=indicator, region=region):
+    for r in repo.query_data(indicator=indicator, region=region, caliber=caliber):
         v = _num(r.get("value"))
         if v is not None and r.get("year"):
             out.append((r["year"], v))
@@ -54,7 +57,8 @@ def hhi(counts: dict) -> float:
 def analyze_quanzhou(repo) -> dict:
     """主分析。region 固定泉州（M5 样板）。"""
     region = "泉州市"
-    values_rows = repo.query_data(region=region)
+    # M7a: 分析只吃 final 口径——2026 预算执行(budget)行不再混入
+    values_rows = repo.query_data(region=region, caliber="final")
     years = sorted({r.get("year") for r in values_rows if r.get("year")})
     # 参考年优先取 GDP 最新年度（完整年度锚点），避免半年预算执行等子年度数据抬高基准
     gdp_years = sorted({r.get("year") for r in values_rows
@@ -93,7 +97,7 @@ def analyze_quanzhou(repo) -> dict:
 
     # ---------- 产业(来自 doc_insights kind=industry) ----------
     industry = []
-    for r in repo.list_doc_insights(kind="industry"):
+    for r in repo.list_doc_insights(kind="industry", region=region):
         try:
             body = json.loads(r["body"])
         except (ValueError, TypeError):
@@ -138,7 +142,7 @@ def analyze_quanzhou(repo) -> dict:
     # ---------- 规划目标(plan_goal) ----------
     plan = {"period": None, "gdp_growth_target": None, "revenue_growth_target": None,
             "jobs_target": None, "evidence": []}
-    for r in repo.list_doc_insights(kind="plan_goal"):
+    for r in repo.list_doc_insights(kind="plan_goal", region=region):
         try:
             body = json.loads(r["body"])
         except (ValueError, TypeError):
@@ -151,7 +155,7 @@ def analyze_quanzhou(repo) -> dict:
         plan["evidence"].extend(body.get("evidence", []))
 
     # ---------- 可信度审读（延迟导入避免环） ----------
-    from ..extract.critique import llm_critique, merge_checks, rule_checks
+    from ..extract.critique import merge_checks, rule_checks
 
     values_by_indicator = {}
     for r in values_rows:
@@ -160,12 +164,16 @@ def analyze_quanzhou(repo) -> dict:
     checks = rule_checks(values_by_indicator)
 
     critiques = []
-    for r in repo.list_doc_insights(kind="critique"):
+    for r in repo.list_doc_insights(kind="critique", region=region):
         try:
             body = json.loads(r["body"])
         except (ValueError, TypeError):
             continue
-        critiques.extend(body.get("critiques", []))
+        # 兼容两种落库形状：整包 {"critiques": [...]} 或单条批判 dict
+        if isinstance(body, dict) and body.get("critiques"):
+            critiques.extend(body["critiques"])
+        elif isinstance(body, dict) and body.get("type"):
+            critiques.append(body)
     merged = merge_checks(checks, critiques)
 
     return {

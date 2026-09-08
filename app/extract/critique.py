@@ -17,7 +17,11 @@ SYSTEM_CRITIQUE = (
     "人均指标掩盖总量停滞等；\n"
     "4) gap 逻辑缺口：目标与现实增速的张力、财力与承诺支出的缺口。\n"
     "输出严格 JSON：{\"critiques\": [{\"type\": \"spin|omission|metric_game|gap\", "
-    "\"severity\": \"high|med|low\", \"claim\": \"原文表述摘录\", "
+    "\"severity\": \"high|med|low\", "
+    "\"subject\": \"批判针对的主题（尽量用候选词之一：地区生产总值/一般公共预算收入/"
+    "税收收入/政府性基金收入/城镇新增就业/进出口总额/常住人口/居民人均可支配收入/"
+    "三次产业/土地财政/目标增速；无明确对应可用 GDP、预算收入等近义词）\", "
+    "\"claim\": \"原文表述摘录\", "
     "\"reality\": \"经济学家的解读——为什么不可全信/缺什么数据验证\", "
     "\"what_to_check\": \"若要证实/证伪需要哪些数据\", "
     "\"confidence\": \"high|med|low\"}]}。\n"
@@ -27,6 +31,38 @@ SYSTEM_CRITIQUE = (
 NUM_RE = re.compile(r"-?[0-9][0-9,]*(?:\.[0-9]+)?")
 
 SEVERITY_ORDER = {"low": 0, "med": 1, "high": 2}
+
+# M7a: 批判 subject → 规则主题归一（解决 llm_critique 无 subject / 近义词不匹配）
+SUBJECT_SYNONYMS = {
+    "gdp": "地区生产总值", "生产总值": "地区生产总值", "地区生产总值": "地区生产总值",
+    "预算收入": "一般公共预算收入", "一般公共预算收入": "一般公共预算收入",
+    "税收收入": "税收收入", "政府性基金收入": "政府性基金收入",
+    "就业": "城镇新增就业", "城镇新增就业": "城镇新增就业",
+    "进出口": "进出口总额", "进出口总额": "进出口总额",
+    "人口": "常住人口", "常住人口": "常住人口",
+    "人均收入": "居民人均可支配收入", "居民人均可支配收入": "居民人均可支配收入",
+    "三次产业": "三次产业", "三次产业和": "三次产业",
+    "土地财政": "土地财政", "土地财政依赖度": "土地财政",
+    "目标增速": "目标增速",
+}
+
+_SUBJECT_SUFFIXES = ("的增速", "增速", "增长", "收入弹性", "弹性", "依赖度", "和", "占比", "比重")
+
+
+def _subj_key(subject: str) -> str:
+    """批判/规则主题归一为同义词键（去量词尾 + 同义映射）。"""
+    s = (subject or "").strip().lower()
+    if not s:
+        return ""
+    changed = True
+    while changed and s:
+        changed = False
+        for suf in _SUBJECT_SUFFIXES:
+            if s.endswith(suf):
+                s = s[: -len(suf)].strip()
+                changed = True
+                break
+    return SUBJECT_SYNONYMS.get(s, s)
 
 
 def parse_number(v):
@@ -151,7 +187,11 @@ def rule_checks(values_by_indicator: dict) -> list:
 
 
 def llm_critique(text: str, client) -> list:
-    """LLM 批判审读一次调用，规范化 critiques。"""
+    """LLM 批判审读一次调用，规范化 critiques。
+
+    client 未启用 → 返回 []（降级）；调用失败 → 抛 LLMError（由调用方计数/告警，
+    不再静默吞错——M7a）。
+    """
     if not getattr(client, "enabled", False):
         return []
     try:
@@ -160,7 +200,7 @@ def llm_critique(text: str, client) -> list:
                                     temperature=0.3)
     except LLMError as e:
         print(f"[critique] 调用失败: {e}")
-        return []
+        raise
     items = data.get("critiques", []) if isinstance(data, dict) else []
     out = []
     for it in items:
@@ -169,6 +209,7 @@ def llm_critique(text: str, client) -> list:
         out.append({
             "type": it.get("type", "gap"),
             "severity": it.get("severity", "med"),
+            "subject": it.get("subject", ""),
             "claim": it.get("claim", ""),
             "reality": it.get("reality", ""),
             "what_to_check": it.get("what_to_check", ""),
@@ -179,17 +220,26 @@ def llm_critique(text: str, client) -> list:
 
 
 def merge_checks(checks: list, critiques: list) -> dict:
-    """双层结果合并：同一 subject 双层命中 → escalated（severity 升一级）。"""
+    """双层结果合并：同一 subject 双层命中 → escalated（severity 升一级）。
+
+    M7a：subject 经 _subj_key 归一后相等或互为包含；critique 无 subject 但
+    confidence=high 且规则 flag → 单层升级（single_layer），防真异常漏报。
+    """
     escalated = []
     for c in checks:
         if c["verdict"] != "flag":
             continue
+        ck = _subj_key(c.get("subject", ""))
         for k in critiques:
-            subj = (k.get("subject") or "").strip()
-            if subj and subj in (c.get("subject") or ""):
+            sk = _subj_key(k.get("subject", ""))
+            hit = bool(sk and ck) and (sk == ck or sk in ck or ck in sk)
+            single = (not sk) and k.get("confidence") == "high"
+            if hit or single:
                 new = dict(c)
                 new["severity"] = "high" if c.get("severity") != "high" else "high"
                 new["critique"] = k
+                if single:
+                    new["single_layer"] = True
                 escalated.append(new)
                 break
     return {"checks": checks, "critiques": critiques, "escalated": escalated}

@@ -43,14 +43,14 @@ def _seed_insights(repo):
          "body": json.dumps({"industries": [
              {"industry": "纺织鞋服", "plan_role": "支柱", "evidence": "e"},
              {"industry": "电子信息", "plan_role": "新兴", "evidence": "e"}]},
-             ensure_ascii=False), "method": "llm"},
+             ensure_ascii=False), "method": "llm", "region": "泉州市", "period": "2026"},
         {"page_id": 1, "source_id": "rep", "kind": "plan_goal", "title": "y",
          "body": json.dumps({"period": "十五五", "targets": {"gdp_growth": 5.0}},
-                            ensure_ascii=False), "method": "llm"},
+                            ensure_ascii=False), "method": "llm", "region": "泉州市", "period": "2026"},
         {"page_id": 1, "source_id": "rep", "kind": "critique", "title": "z",
          "body": json.dumps({"critiques": [{"type": "spin", "severity": "med",
                                             "evidence": "历史新高"}]},
-                            ensure_ascii=False), "method": "llm"},
+                            ensure_ascii=False), "method": "llm", "region": "泉州市", "period": "2026"},
     ]
     repo.insert_doc_insights(items)
 
@@ -172,3 +172,56 @@ def test_region_isolation_no_cross_pollution(tmp_path):
     assert p["fiscal"]["gdp"] == 14000.0      # 泉州 GDP，非福建 60199.45
     assert p["fiscal"]["revenue"] == 592.07   # 泉州预算收入，非福建 3723.35
     assert p["employment"]["population"] == 890.0  # 泉州人口，非漳州 508.4
+
+
+# ---------- M7a: caliber 隔离与洞察 region 隔离 ----------
+
+def _dv(region, ind, year, value, **kw):
+    return DataValue(None, None, region, year, ind, value, "亿元", "财政金融", "…", **kw)
+
+
+def test_fiscal_ignores_budget_caliber(tmp_path):
+    """预算执行口径(2026)行不进入画像取值与跨年增速。"""
+    repo = _repo(tmp_path)
+    _seed_values(repo)
+    repo.insert_values([
+        _dv("泉州市", "地方一般公共预算收入", "2026", "355.92", caliber="budget"),
+        _dv("泉州市", "地区生产总值", "2026", "7000.0", caliber="budget"),
+    ])
+    p = analyze_quanzhou(repo)
+    f = p["fiscal"]
+    assert p["reference_year"] == "2025"              # GDP 2026(budget)不抬高参考年
+    assert f["revenue"] == 592.07                     # 不吃 2026 预算 355.92
+    # 跨年增速仍是 2025 vs 2024（不出现 (2025,592)→(2026,356) 的 -40% 假值）
+    assert abs(f["revenue_growth"] - (592.07 - 570.0) / 570.0 * 100) < 1e-6
+
+
+def test_insights_region_isolation(tmp_path):
+    """doc_insights 按 region 隔离：漳州洞察不得进入泉州画像。"""
+    repo = _repo(tmp_path)
+    _seed_insights(repo)
+    repo.insert_doc_insights([
+        {"page_id": 2, "source_id": "zz", "kind": "industry", "title": "漳州",
+         "body": json.dumps({"industries": [
+             {"industry": "特殊钢铁", "plan_role": "支柱", "evidence": "e"}]},
+             ensure_ascii=False), "method": "llm", "region": "漳州市", "period": "2026"},
+    ])
+    p = analyze_quanzhou(repo)
+    names = {i["industry"] for i in p["industry"]}
+    assert "纺织鞋服" in names and "电子信息" in names
+    assert "特殊钢铁" not in names           # 漳州洞察被 region 过滤
+
+
+def test_critique_single_dict_body_shape_supported(tmp_path):
+    """兼容 run_documents 落库的单条批判 dict 形状（type/subject/...）。"""
+    repo = _repo(tmp_path)
+    _seed_values(repo)
+    repo.insert_doc_insights([
+        {"page_id": 3, "source_id": "rep", "kind": "critique", "title": "c",
+         "body": json.dumps({"type": "spin", "severity": "high", "subject": "GDP",
+                             "claim": "稳中向好", "reality": "r", "what_to_check": "w",
+                             "confidence": "high"}, ensure_ascii=False),
+         "method": "llm", "region": "泉州市", "period": "2026"},
+    ])
+    p = analyze_quanzhou(repo)
+    assert any(k["type"] == "spin" for k in p["credibility"]["critiques"])

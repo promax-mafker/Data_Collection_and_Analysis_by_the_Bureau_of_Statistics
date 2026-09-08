@@ -9,17 +9,21 @@ import traceback
 import yaml
 
 from ..parse.table import extract_table_records
-from ..schemas import Page
+from ..schemas import Bureau, Page
 from ..extract.rule_extractor import RuleExtractor, clean_bulletin_text
 from ..extract.llm_extractor import LLMExtractor
 from .parser import decode_html, extract_text, hash_text
 from .pdf import extract_pdf_text
+from .client import FetchError
 
 # 县（市、区）名匹配（泉州）
 COUNTY_NAMES = ["晋江市", "石狮市", "南安市", "惠安县", "安溪县",
                 "永春县", "德化县", "鲤城区", "丰泽区", "洛江区",
                 "泉港区", "晋江", "石狮", "南安", "惠安", "安溪",
                 "永春", "德化", "鲤城", "丰泽", "洛江", "泉港"]
+
+# M7a：PDF 文本低于该阈值视为扫描版/空文档，不再静默当正文
+PDF_MIN_TEXT = 80
 
 
 def load_sources(path):
@@ -33,12 +37,18 @@ def _fetch(client, source) -> tuple:
     """按 kind 抓取，返回 (清洗文本, 原始HTML或None)。
 
     table 类源需要保留 HTML 结构（表格解析），故额外返回原始 html。
+    M7a：按 URL 扩展名 + 魔数嗅探文档类型；.doc/.xls 等不支持类型显式报错。
     """
     url = source["url"]
     data = client.download(url)
     raw_html = None
+    ext = url.lower().rsplit(".", 1)[-1] if "." in url else ""
     if source.get("kind") == "pdf" or data[:4] == b"%PDF":
         text = extract_pdf_text(data)
+        if len(text.strip()) < PDF_MIN_TEXT:
+            raise FetchError(f"PDF 文本过短({len(text.strip())} 字)，疑似扫描版/空文档: {url}")
+    elif ext in ("doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "wps"):
+        raise FetchError(f"不支持的文档类型 .{ext}（仅 HTML/PDF 可解析）: {url}")
     else:
         html = decode_html(data)
         raw_html = html
@@ -121,8 +131,13 @@ def run_documents(client, repo, sources, rules=None, llm_client=None, region="�
     rule_ex = RuleExtractor()
     llm_ex = LLMExtractor(client=llm_client) if llm_client is not None else None
     stats = {"pages": 0, "values": 0, "insights": 0, "enterprises": 0,
-             "errors": 0, "skipped": []}
-    meta_bureau_id = 1  # 复用现有 bureau 关联（泉州统计局 id），页面归属仅溯源用
+             "errors": 0, "skipped": [], "llm_errors": 0, "critiques": 0}
+    # M7a: bureau 归属按 region 解析（不再硬编码 id=1），未命中自建 meta 机构
+    bureau_id = repo.find_bureau_by_region(region)
+    if bureau_id is None:
+        meta = Bureau(level="meta", name=f"{region}文档源",
+                      url=f"meta://{region}", region=region, verified=True)
+        bureau_id = repo.upsert_bureau(meta)
 
     for src in sources:
         url = src["url"]
@@ -134,7 +149,7 @@ def run_documents(client, repo, sources, rules=None, llm_client=None, region="�
             content_hash = hash_text(text)
             page_title = src.get("name", url)
             year = src.get("period", "")
-            page = Page(bureau_id=meta_bureau_id, url=url, title=page_title,
+            page = Page(bureau_id=bureau_id, url=url, title=page_title,
                         content_text=text, dataset_type="topic", period=year,
                         content_hash=content_hash,
                         doc_category=src.get("category", "bulletin"))
@@ -142,8 +157,10 @@ def run_documents(client, repo, sources, rules=None, llm_client=None, region="�
             stats["pages"] += 1
 
             parse_mode = src.get("parse", "rule")
-            page_meta = {"page_id": pid, "bureau_id": meta_bureau_id,
-                         "region": region, "year": year}
+            caliber = "budget" if src.get("category") == "budget" else "final"
+            page_meta = {"page_id": pid, "bureau_id": bureau_id,
+                         "region": region, "year": year,
+                         "caliber": caliber, "source_url": url}
 
             if parse_mode in ("rule", "rule+llm"):
                 names = src.get("numeric_rules") or []
@@ -163,8 +180,27 @@ def run_documents(client, repo, sources, rules=None, llm_client=None, region="�
                                       "title": page_title, "url": url,
                                       "kind": src.get("kind")})
                     items = llm_ex.extract_insights(page_dict, text, src)
-                    stats["insights"] += repo.replace_doc_insights(pid, items)
-                # llm 未启用：静默跳过洞察（页面已落库）
+                    items = [dict(it, region=region, period=year) for it in items]
+                    if not items:
+                        stats["llm_errors"] += 1
+                    stats["insights"] += len(items)
+                    crit_items = []
+                    try:
+                        from ..extract.critique import llm_critique
+                        crits = llm_critique(text, llm_client)
+                        if crits:
+                            crit_items = [{"page_id": pid, "source_id": src.get("id"),
+                                           "kind": "critique",
+                                           "title": f"{page_title}·批判审读",
+                                           "body": __import__("json").dumps(c, ensure_ascii=False),
+                                           "method": "llm", "region": region,
+                                           "period": year} for c in crits]
+                            stats["critiques"] += len(crit_items)
+                    except Exception as e:
+                        stats["llm_errors"] += 1
+                        print(f"[documents] 批判失败 {url}: {e}")
+                    stats["insights"] += repo.replace_doc_insights(pid, items + crit_items)
+                # llm 未启用：页面落库但洞察/批判静默跳过（不产错）
         except Exception as e:
             stats["errors"] += 1
             print(f"[documents] 源失败 {url}: {e}\n{traceback.format_exc()}")

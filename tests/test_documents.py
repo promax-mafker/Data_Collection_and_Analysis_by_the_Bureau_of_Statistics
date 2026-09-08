@@ -1,4 +1,4 @@
-﻿"""documents.py 源注册表加载 + run_documents 编排测试。"""
+"""documents.py 源注册表加载 + run_documents 编排测试。"""
 import os
 
 import pytest
@@ -192,4 +192,147 @@ def test_run_documents_error_isolated(tmp_path):
     assert stats["errors"] == 2
     assert stats["pages"] == 1
     assert len(repo.query_data(indicator="税收收入")) == 1
+
+
+# ---------- M7a: 类型白名单 / bureau 归属解析 / caliber ----------
+
+DOC_URL = "http://t1/old.doc"
+
+
+def test_fetch_unsupported_extension_raises(tmp_path):
+    """.doc/.xls 等二进制附件不再按 HTML 解析吞错。"""
+    repo = _repo(tmp_path)
+    client = FakeClient({DOC_URL: ("html", "<p>doc 内容</p>")})
+    src = [{"id": "doc", "name": "旧公报", "category": "bulletin", "kind": "html",
+            "url": DOC_URL, "period": "2019", "parse": "rule",
+            "numeric_rules": ["地区生产总值"]}]
+    stats = run_documents(client, repo, src, rules=None, llm_client=None, region="泉州市")
+    assert stats["errors"] == 1
+    assert stats["pages"] == 0
+    assert len(repo.list_pages()) == 0  # 不产生垃圾页
+
+
+def test_pdf_short_text_raises(tmp_path, monkeypatch):
+    """扫描版/极短 PDF 文本不静默当正文。"""
+    import app.fetch.documents as docs_mod
+    monkeypatch.setattr(docs_mod, "extract_pdf_text", lambda data: "仅两行")
+    repo = _repo(tmp_path)
+    client = FakeClient({"http://t1/scan.pdf": ("bytes", b"%PDF-1.4 fake")})
+    src = [{"id": "scan", "name": "扫描版", "category": "bulletin", "kind": "pdf",
+            "url": "http://t1/scan.pdf", "period": "2019", "parse": "rule",
+            "numeric_rules": ["地区生产总值"]}]
+    stats = run_documents(client, repo, src, rules=None, llm_client=None, region="泉州市")
+    assert stats["errors"] == 1 and stats["pages"] == 0
+
+
+def test_run_documents_creates_or_reuses_meta_bureau(tmp_path):
+    """bureau 归属不再硬编码 id=1：按 region 查找，未命中自建 meta 机构并复用。"""
+    repo = _repo(tmp_path)
+    assert repo.find_bureau_by_region("泉州市") is None  # 空库无泉州 bureau
+    client = FakeClient({"http://t1/budget": ("html", BUDGET_HTML)})
+    src = [s for s in _sources(tmp_path) if s["id"] == "exec"]
+    stats = run_documents(client, repo, src, rules=None, llm_client=None, region="泉州市")
+    assert stats["errors"] == 0
+    bid = repo.find_bureau_by_region("泉州市")
+    assert bid is not None
+    metas = [b for b in repo.list_bureaus() if b["level"] == "meta"]
+    assert len(metas) == 1 and metas[0]["id"] == bid
+    assert metas[0]["name"] == "泉州市文档源"
+    pages = repo.list_pages()
+    assert all(p["bureau_id"] == bid for p in pages)
+    # 二次 run 复用同一机构（不重复建）
+    run_documents(client, repo, src, rules=None, llm_client=None, region="泉州市")
+    metas = [b for b in repo.list_bureaus() if b["level"] == "meta"]
+    assert len(metas) == 1
+
+
+def test_values_get_caliber_from_category(tmp_path):
+    """budget 类源数值行 caliber='budget'；bulletin 源 caliber='final'。"""
+    repo = _repo(tmp_path)
+    html_bulletin = "<html><body><p>全年地区生产总值 5000.1 亿元。</p></body></html>"
+    client = FakeClient({
+        "http://t1/budget": ("html", BUDGET_HTML),
+        "http://t1/bul": ("html", html_bulletin),
+    })
+    src = [
+        {"id": "exec", "name": "预算执行", "category": "budget", "kind": "html",
+         "url": "http://t1/budget", "period": "2026", "parse": "rule",
+         "numeric_rules": ["一般公共预算收入"]},
+        {"id": "bul", "name": "公报", "category": "bulletin", "kind": "html",
+         "url": "http://t1/bul", "period": "2025", "parse": "rule",
+         "numeric_rules": ["地区生产总值"]},
+    ]
+    stats = run_documents(client, repo, src, rules=None, llm_client=None, region="泉州市")
+    assert stats["errors"] == 0
+    cal = {r["indicator_name"]: r["caliber"] for r in repo.query_data(region="泉州市")}
+    assert cal["一般公共预算收入"] == "budget"
+    assert cal["地区生产总值"] == "final"
+    assert repo.query_data(region="泉州市")[0]["source_url"]  # 带来源 URL
+
+
+# ---------- M7a: LLM 批判接线 / llm_errors / 空结果不清旧 ----------
+
+class RouteLLM:
+    """按 system prompt 内容分流：抽取 or 批判。"""
+    def __init__(self, industries=None, critiques=None, fail_on=None):
+        self.enabled = True
+        self.industries = industries or [{"industry": "纺织鞋服", "plan_role": "支柱",
+                                          "evidence": "实施制造业强市战略"}]
+        self.critiques = critiques or [{"type": "spin", "severity": "high",
+                                        "subject": "GDP", "claim": "稳中向好",
+                                        "reality": "无数据支撑", "what_to_check": "w",
+                                        "confidence": "high"}]
+        self.fail_on = fail_on  # "extract" | "critique"
+
+    def complete_json(self, system, user, temperature=None):
+        if "critiques" in system:
+            if self.fail_on == "critique":
+                from app.extract.llm_client import LLMError
+                raise LLMError("critique boom")
+            return {"critiques": self.critiques}
+        if self.fail_on == "extract":
+            from app.extract.llm_client import LLMError
+            raise LLMError("extract boom")
+        return {"industries": self.industries}
+
+
+def test_critique_written_to_doc_insights(tmp_path):
+    repo = _repo(tmp_path)
+    client = FakeClient({"http://t1/report": ("html", REPORT_HTML)})
+    src = [s for s in _sources(tmp_path) if s["id"] == "rep"]
+    stats = run_documents(client, repo, src, rules=None,
+                          llm_client=RouteLLM(), region="泉州市")
+    assert stats["errors"] == 0
+    assert stats["critiques"] == 1
+    rows = repo.list_doc_insights(kind="critique", region="泉州市")
+    assert len(rows) == 1
+    assert rows[0]["period"] == "2026"
+    import json
+    body = json.loads(rows[0]["body"])
+    assert body["type"] == "spin" and body["subject"] == "GDP"
+
+
+def test_critique_failure_counts_llm_error(tmp_path):
+    repo = _repo(tmp_path)
+    client = FakeClient({"http://t1/report": ("html", REPORT_HTML)})
+    src = [s for s in _sources(tmp_path) if s["id"] == "rep"]
+    stats = run_documents(client, repo, src, rules=None,
+                          llm_client=RouteLLM(fail_on="critique"), region="泉州市")
+    assert stats["errors"] == 0            # fetch 未失败
+    assert stats["llm_errors"] == 1        # 批判失败计入 llm_errors
+    assert repo.list_doc_insights(kind="critique") == []
+
+
+def test_extract_failure_keeps_old_insights_and_counts(tmp_path):
+    """LLM 抽取失败 → llm_errors 计数且旧洞察不被清空。"""
+    repo = _repo(tmp_path)
+    client = FakeClient({"http://t1/report": ("html", REPORT_HTML)})
+    src = [s for s in _sources(tmp_path) if s["id"] == "rep"]
+    run_documents(client, repo, src, rules=None, llm_client=RouteLLM(), region="泉州市")
+    assert len(repo.list_doc_insights()) >= 1  # 第一轮有洞察
+    # 第二轮：抽取失败 → 洞察应保留(不抹库)，llm_errors 计数
+    stats2 = run_documents(client, repo, src, rules=None,
+                           llm_client=RouteLLM(fail_on="extract"), region="泉州市")
+    assert stats2["llm_errors"] == 1
+    assert len(repo.list_doc_insights()) >= 1  # 旧洞察未被空结果清掉
 

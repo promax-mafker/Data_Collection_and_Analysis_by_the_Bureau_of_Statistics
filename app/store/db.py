@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS data_values (
   category TEXT,
   raw_text TEXT,
   method TEXT NOT NULL DEFAULT 'rule',
+  caliber TEXT NOT NULL DEFAULT 'final',
+  source_url TEXT NOT NULL DEFAULT '',
   extracted_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS runs (
@@ -60,6 +62,8 @@ CREATE TABLE IF NOT EXISTS doc_insights (
   title TEXT,
   body TEXT,
   method TEXT NOT NULL DEFAULT 'llm',
+  region TEXT NOT NULL DEFAULT '',
+  period TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS enterprises (
@@ -103,6 +107,9 @@ CREATE TABLE IF NOT EXISTS enterprise_industry (
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 def init_db(path: str) -> sqlite3.Connection:
@@ -112,8 +119,36 @@ def init_db(path: str) -> sqlite3.Connection:
     conn.commit()
     return conn
 
+def _table_cols(conn: sqlite3.Connection, table: str) -> list:
+    return [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+
 def _migrate(conn: sqlite3.Connection):
-    """幂等迁移：旧库 pages 表无 doc_category 列时补列（旧行默认 bulletin）。"""
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(pages)").fetchall()]
-    if "doc_category" not in cols:
+    """幂等迁移：
+    1) 旧库 pages 表无 doc_category 列时补列（旧行默认 bulletin）。
+    2) data_values 补 caliber/source_url（M7a 口径维度）。
+    3) doc_insights 补 region/period（M7a 区域隔离）。
+    4) 回填：budget 页数值行 caliber='budget'；洞察 region 按 page→bureau。
+    """
+    # 1) pages.doc_category
+    if "doc_category" not in _table_cols(conn, "pages"):
         conn.execute("ALTER TABLE pages ADD COLUMN doc_category TEXT NOT NULL DEFAULT 'bulletin'")
+    # 2) data_values 口径列
+    dv_cols = _table_cols(conn, "data_values")
+    if "caliber" not in dv_cols:
+        conn.execute("ALTER TABLE data_values ADD COLUMN caliber TEXT NOT NULL DEFAULT 'final'")
+    if "source_url" not in dv_cols:
+        conn.execute("ALTER TABLE data_values ADD COLUMN source_url TEXT NOT NULL DEFAULT ''")
+    # 3) doc_insights 区域列
+    di_cols = _table_cols(conn, "doc_insights")
+    if "region" not in di_cols:
+        conn.execute("ALTER TABLE doc_insights ADD COLUMN region TEXT NOT NULL DEFAULT ''")
+    if "period" not in di_cols:
+        conn.execute("ALTER TABLE doc_insights ADD COLUMN period TEXT NOT NULL DEFAULT ''")
+    # 4) 回填（幂等）
+    conn.execute(
+        "UPDATE data_values SET caliber='budget' "
+        "WHERE page_id IN (SELECT id FROM pages WHERE doc_category='budget')")
+    conn.execute(
+        "UPDATE doc_insights SET region="
+        "(SELECT b.region FROM pages p JOIN bureaus b ON b.id=p.bureau_id WHERE p.id=doc_insights.page_id) "
+        "WHERE region='' AND page_id IN (SELECT id FROM pages)")
