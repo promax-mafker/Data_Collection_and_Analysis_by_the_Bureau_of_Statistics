@@ -30,6 +30,7 @@
 | M6 经济驱动画像 | ✅ 完成 | 实际产业结构错配 + 三驾马车(消费/债务投资/出口) + Kami Parchment 报告（详见 §4.6） |
 | M7 二期规划 | ⏳ 未开始 | 见 §6 |
 | M7a 管线鲁棒性 P0 | ✅ 完成 | 对抗性审查 → P0 修复：单值化/口径/事务/白名单/批判接线/region 隔离/数据清理（详见 §4.7） |
+| M8 决策树引擎 | ✅ 完成 | 决策树代码化：`decision_tree.py` 18 节点裁决 + 报告第五章 + CLI/API + A10 取数修复（详见 §4.8） |
 
 ## 3. 当前能力清单（已验证）
 
@@ -179,6 +180,19 @@
 
 **验证**：测试 166 → **206 passed**（新增 40：迁移/事务/单值化/批判/region/清理）；真实库清理后抽查全部符合预期；API 冒烟 `/api/data?text=泉州税收收入2025` 仅返回 814.34(final)，2026 预算行带 caliber=budget。
 
+### §4.8 M8 决策树引擎与取数修复(2026-09-08)
+
+**触发**：方法论文档 `docs/ANALYSIS_DECISION_TREE.md` → 代码化请求 → 设计批准(`docs/DESIGN_M8_DECISION_TREE.md`)。
+
+**交付**：
+- `app/analysis/decision_tree.py`：`tree_audit(repo, region)`——T0-T5 五层 **18 节点**裁决(ok/flag/verify/na/info)，复用 rule_checks/industry_gap/三驾马车；输出节点证据 + missing 缺口 + verify_items；阈值与原理(P1-P6)全注释。
+- 集成：Kami 经济画像报告**第五章「方法论体检」**(节点表+缺口+待核验+汇总)；`quanzhou.py --tree` CLI；`/api/quanzhou/tree` JSON。
+- A10 取数修复(同年口径)：`consumption.py`(收支/食品同年、倾向恩格尔仅同年算)、`trade.py`(出口进口同年最大年份,不再取 1984)、`investment.py`(债务年份与 GDP 分母同年)、`economy_report.py` 口径标签由数据年份生成。
+- 真实库归属修复：M7a 遗留——历史泉州页/data_values 挂 bureau_id=1(国家局)且 doc_insights.region 回填成 '中国' → 已 UPDATE 归位(bureau_id=5 泉州市统计局,insights region='泉州市')。
+- 里程碑行:M7a P0 ✅ / M8 决策树 ✅;测试 **206 → 218 passed**。
+
+**真实验证**(真实 stats.db)：18 节点裁决 = ok6/flag1/verify2/na7/info2；真实信号正确——T0-1 预算口径 verify(3 行)、T3-4 限额利用率 96.6% **flag**、T3-2 自给率 67.3% pass、T2-3 43 个 overpromised 无实际占比 verify(截断名单)；na 项如实暴露真实缺口(泉州缺 2024 年 GDP→T1 全 na;常住人口经 econ_series 认定后 T0-2 通过)。报告 `data/reports/quanzhou_economy.html` 含第五章,API 冒烟通过。
+
 ## 5. 已知限制 / 技术债
 
 | 类别 | 说明 | 影响 |
@@ -207,11 +221,12 @@
 
 ```bash
 cd E:\Deepseek_harness\stats-collector
-.venv\Scripts\python -m pytest -q          # 确认 206 passed
+.venv\Scripts\python -m pytest -q          # 确认 218 passed
 .venv\Scripts\python run.py                 # 一键采集统计公报（网络抖动漏检可重跑）
 .venv\Scripts\python run.py analyze         # 生成 data/reports/report.html（全省横比）
 .venv\Scripts\python quanzhou.py            # 泉州纵深画像（采集+LLM+分析+报告）
-.venv\Scripts\python quanzhou.py --economy  # M6 经济驱动画像（Kami 报告 data/reports/quanzhou_economy.html）
+.venv\Scripts\python quanzhou.py --economy  # M6 经济驱动画像（Kami 报告 data/reports/quanzhou_economy.html，含第五章方法论体检）
+.venv\Scripts\python quanzhou.py --tree     # M8 决策树裁决（终端打印 18 节点）
 git log --oneline                           # 查看最近 commit
 ```
 

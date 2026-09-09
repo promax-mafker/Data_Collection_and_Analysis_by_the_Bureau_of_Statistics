@@ -164,6 +164,12 @@ def api_quanzhou_economy():
     from .analysis.economy_report import render_economy_report
     return HTMLResponse(render_economy_report(build_repo()))
 
+@app.get("/api/quanzhou/tree")
+def api_quanzhou_tree():
+    """M8 决策树方法论体检（JSON 裁决）。"""
+    from .analysis.decision_tree import tree_audit
+    return tree_audit(build_repo(), region="泉州市")
+
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "app", "web", "static"), html=True), name="static")
 
 if __name__ == "__main__":
