@@ -1,4 +1,4 @@
-"""M8 分析决策树引擎——把 docs/ANALYSIS_DECISION_TREE.md 的判定逻辑代码化。
+﻿"""M8 分析决策树引擎——把 docs/methodology/ANALYSIS_DECISION_TREE.md 的判定逻辑代码化。
 
 `tree_audit(repo, region)` 对地区年度数据执行 T0-T5 分层体检：
 - verdict 语义：ok(规则通过) / flag(规则越线) / verify(待人工复核) /

@@ -1,4 +1,4 @@
-"""M6 泉州经济驱动画像 Kami 报告组装。
+﻿"""M6 泉州经济驱动画像 Kami 报告组装。
 
 把 M5 画像 + M6 错配矩阵 + 三驾马车 组装成 Kami Parchment HTML。
 M8:口径标签由数据实际年份生成(不再写死);第六章「方法论体检」渲染决策树裁决。
@@ -104,7 +104,7 @@ def render_economy_report(repo) -> str:
     # 五、方法论体检(决策树裁决)
     tree = tree_audit(repo, region="泉州市")
     r.section("sec-tree", "五、方法论体检(决策树裁决)")
-    r.para("按「地区经济分析决策树」(docs/ANALYSIS_DECISION_TREE.md)对上述分析过程本身体检:"
+    r.para("按「地区经济分析决策树」(docs/methodology/ANALYSIS_DECISION_TREE.md)对上述分析过程本身体检:"
            "可信门(T0)→增长质量(T1)→结构(T2)→需求侧(T3)→分配(T4)→承诺(T5)。"
            "规则校验才给红灯,经济解读只作参考;缺数据走缺口清单,不猜测。")
     _VERDICT_LABEL_TREE = {"ok": "⚪ 通过", "flag": "🔴 存疑", "verify": "🟡 待核验",

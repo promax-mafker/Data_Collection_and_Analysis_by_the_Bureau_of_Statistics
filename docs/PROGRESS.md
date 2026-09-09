@@ -1,4 +1,4 @@
-# 项目进度 · 统计局数据采集与分析平台
+﻿# 项目进度 · 统计局数据采集与分析平台
 
 > 本文件是项目**唯一进度基准**：每次迭代后更新此文件，替代零散聊天记录。
 > 最近更新：2026-09-03（查询层宽容匹配交付）
@@ -17,7 +17,7 @@
 
 | 里程碑 | 状态 | 关键产出 |
 |--------|------|---------|
-| M0 需求与设计 | ✅ 完成 | `docs/DESIGN.md`（设计）、`docs/PLAN.md`（实现计划） |
+| M0 需求与设计 | ✅ 完成 | `docs/planning/DESIGN.md`（设计）、`docs/planning/PLAN.md`（实现计划） |
 | M1 核心采集平台 | ✅ 完成 | 递进发现 / 采集 / 规则抽取 / SQLite 入库 / Web / CLI |
 | M2 GitHub 交付 | ✅ 完成 | 完整 README；经 GitHub MCP 推送到用户仓库（含 contribution 归属） |
 | M3 健壮性修复 | ✅ 完成 | 真实数据驱动：早停优化、同域过滤、内容去重、正文清洗、年份修正 |
@@ -122,7 +122,7 @@
 
 ### 4.5 泉州经济纵深画像（2026-09，M5）
 
-用户指出「只有最抽象的截面，看不到支柱产业/核心机构/就业岗位分布/财税结构」。经澄清+侦察（5 类源全部实测 200 直连），落地**政府公开文件全家桶**单市样板（设计 `docs/DESIGN_M5_QUANZHOU.md`、计划 `docs/PLAN_M5_QUANZHOU.md`）：
+用户指出「只有最抽象的截面，看不到支柱产业/核心机构/就业岗位分布/财税结构」。经澄清+侦察（5 类源全部实测 200 直连），落地**政府公开文件全家桶**单市样板（设计 `docs/planning/DESIGN_M5_QUANZHOU.md`、计划 `docs/planning/PLAN_M5_QUANZHOU.md`）：
 
 | 维度 | 数据源 | 引擎 | 真实验证产出 |
 |------|--------|------|------------|
@@ -145,7 +145,7 @@
 
 ### 4.6 经济驱动画像：产业结构错配 + 三驾马车（2026-09，M6）
 
-用户指出「判断支柱产业不能只读政府规划，要有实际数据支撑」，并追加「CPI/收入中位数衡量消费支撑」「政府债务/GDP 衡量投资拉动、举一反三出口」。侦察确认可得：五经普 2023 分行业、统计年鉴（人口/收支/CPI/重点产业/进出口）、政府债务 2019-2024、决算支出；**制度性不可得**（地市不公布）：收入中位数、支出法 GDP、一般/专项债分项、分行业税收（设计 `docs/DESIGN_M6_INDUSTRY_GAP.md`、计划 `docs/PLAN_M6_INDUSTRY_GAP.md`）。
+用户指出「判断支柱产业不能只读政府规划，要有实际数据支撑」，并追加「CPI/收入中位数衡量消费支撑」「政府债务/GDP 衡量投资拉动、举一反三出口」。侦察确认可得：五经普 2023 分行业、统计年鉴（人口/收支/CPI/重点产业/进出口）、政府债务 2019-2024、决算支出；**制度性不可得**（地市不公布）：收入中位数、支出法 GDP、一般/专项债分项、分行业税收（设计 `docs/planning/DESIGN_M6_INDUSTRY_GAP.md`、计划 `docs/planning/PLAN_M6_INDUSTRY_GAP.md`）。
 
 | 块 | 引擎 | 真实验证产出 |
 |----|------|------------|
@@ -165,9 +165,9 @@
 
 ### §4.7 M7a 管线鲁棒性 P0(2026-09-08)
 
-**触发**：全链路对抗性审查（`docs/REVIEW_PIPELINE_ROBUSTNESS.md`，第一性原理 + 真实库实测 + 双子代理专项）→ A/B 级发现：枚举式抽取重复入库、口径年份混装、空结果抹库、非事务替换、LLM 批判双层死代码、洞察无 region、硬编码 bureau_id、.doc 静默吞错。
+**触发**：全链路对抗性审查（`docs/audit/REVIEW_PIPELINE_ROBUSTNESS.md`，第一性原理 + 真实库实测 + 双子代理专项）→ A/B 级发现：枚举式抽取重复入库、口径年份混装、空结果抹库、非事务替换、LLM 批判双层死代码、洞察无 region、硬编码 bureau_id、.doc 静默吞错。
 
-**已交付**（设计 `docs/DESIGN_M7_ROBUSTNESS.md`、计划 `docs/PLAN_M7A_ROBUSTNESS.md`，TDD 逐任务红绿）：
+**已交付**（设计 `docs/planning/DESIGN_M7_ROBUSTNESS.md`、计划 `docs/planning/PLAN_M7A_ROBUSTNESS.md`，TDD 逐任务红绿）：
 | 项 | 变更 |
 |---|---|
 | 抽取单值化 | `rule_extractor`：`normalize_value`(全角/千分位/空格) + `_main_caliber_score` 主口径收敛 + %-占比误配排除 + 跨章节 `_converge_values` |
@@ -182,7 +182,7 @@
 
 ### §4.8 M8 决策树引擎与取数修复(2026-09-08)
 
-**触发**：方法论文档 `docs/ANALYSIS_DECISION_TREE.md` → 代码化请求 → 设计批准(`docs/DESIGN_M8_DECISION_TREE.md`)。
+**触发**：方法论文档 `docs/methodology/ANALYSIS_DECISION_TREE.md` → 代码化请求 → 设计批准(`docs/planning/DESIGN_M8_DECISION_TREE.md`)。
 
 **交付**：
 - `app/analysis/decision_tree.py`：`tree_audit(repo, region)`——T0-T5 五层 **18 节点**裁决(ok/flag/verify/na/info)，复用 rule_checks/industry_gap/三驾马车；输出节点证据 + missing 缺口 + verify_items；阈值与原理(P1-P6)全注释。
