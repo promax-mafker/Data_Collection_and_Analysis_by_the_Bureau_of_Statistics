@@ -25,5 +25,14 @@ def extract_text(html: str) -> str:
     text = soup.get_text("\n", strip=True)
     return re.sub(r"\n{2,}", "\n", text)
 
+def decode_html(data: bytes) -> str:
+    """统一网页解码口径：优先 UTF-8，失败依次回退 GB18030 / GBK。"""
+    for enc in ("utf-8", "gb18030", "gbk"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()

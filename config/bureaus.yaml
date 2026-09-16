@@ -26,6 +26,40 @@ known_domains:
   - tjj.ningde.gov.cn
 exclude_domains:
   - www.stats.gov.cn
+manual_bureaus:
+  - level: city
+    name: 莆田市统计局
+    region: 莆田市
+    url: https://www.putian.gov.cn/zfxxgk/bmzfxxgk/ptstjj/zfxxgk/fdzdgknr/tjx/tjgb_20383/
+    bulletin_search:
+      endpoint: https://www.putian.gov.cn/was5/web/search
+      channelid: "210831"
+      searchword: 国民经济和社会发展统计公报
+      perpage: "50"
+      include:
+        - 莆田市
+      exclude:
+        - 仙游
+        - 城厢
+        - 涵江
+        - 荔城
+        - 秀屿
+        - 解读
+        - 访谈
+        - 印发
+        - 通知
+  - level: city
+    name: 漳州市统计局
+    region: 漳州市
+    url: http://tjj.zhangzhou.gov.cn/
+    listing_urls:
+      - http://tjj.zhangzhou.gov.cn/cms/html/zzstjj/tjgb/index.html
+  - level: city
+    name: 南平市统计局
+    region: 南平市
+    url: http://tjj.np.gov.cn/
+    listing_urls:
+      - https://www.np.gov.cn/cms/html/npszf/ndsj/index.html
 bulletin_keywords:
   - 统计公报
   - 国民经济和社会发展统计公报

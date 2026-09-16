@@ -1,0 +1,36 @@
+# 站点适配知识库（M9a）
+#
+# 目的：把「站点 → 公报栏目 / 分页模式 / TLS 与 Referer 需求」从代码搬到配置。
+# 依据：docs/research/EVIDENCE_DATA_GAP.md §5（10 站点可达性实测）。
+# 铁律（设计 P2）：一律不硬编码详情 URL 与表号 —— 详情链接必须从栏目页 HTML 解析。
+adapters:
+  - region: 福建省
+    bulletin_column: https://tjj.fujian.gov.cn/xxgk/tjgb/
+    note: 一页列全 2000-2025，无需分页（实测 70 个详情链接）
+
+  - region: 泉州市
+    bulletin_column: http://tjj.quanzhou.gov.cn/tjzl/tjgb/
+    paging: { pattern: "index_{n}.htm", start: 1, max_pages: 6 }
+    note: 分页为反序：/tjzl/tjgb/ 为第 1 页，index_1.htm 为第 2 页；实测可回溯 2007
+
+  - region: 福州市
+    bulletin_column: https://tjj.fuzhou.gov.cn/zwgk/tjzl/ndbg/
+    note: 首页只挂最新两期，须走栏目页
+
+  - region: 厦门市
+    bulletin_column: https://tjj.xm.gov.cn/tjzl/ndgb/
+    referer: https://tjj.xm.gov.cn/
+    note: 栏目页直连实测 403，需 Referer
+
+  - region: 三明市
+    verify_tls: false
+    note: tjj.sm.gov.cn 实测 SSL 握手失败；栏目 URL 待侦察
+
+  - region: 龙岩市
+    bulletin_column: https://lytjj.longyan.gov.cn/xxgk/tjgb/
+
+  - region: 宁德市
+    bulletin_column: https://tjj.ningde.gov.cn/xxgk/tjxx/tjgb/
+
+  - region: 南平市
+    note: 首页 0 个公报入口，栏目路径待侦察（既有 manual listing_urls 覆盖）

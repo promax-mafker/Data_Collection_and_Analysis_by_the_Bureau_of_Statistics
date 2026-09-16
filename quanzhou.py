@@ -17,6 +17,21 @@ def main():
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     repo = Repository(init_db(db_path))
 
+    # M8 方法论体检(决策树裁决,纯分析不采集)
+    if "--tree" in sys.argv:
+        from app.analysis.decision_tree import tree_audit
+        tree = tree_audit(repo, region="泉州市")
+        print(f"决策树裁决(共 {len(tree['nodes'])} 节点) 汇总: {tree['summary']}")
+        flag = {"ok": "PASS", "flag": "FLAG", "verify": "VERIFY",
+                "na": "NA", "info": "info"}
+        for n in sorted(tree["nodes"], key=lambda x: x["id"]):
+            print(f"  [{n['id']}] {flag.get(n['verdict'], '?')} {n['question']} | {n['evidence']}")
+        if tree["missing"]:
+            print("数据缺口:", "、".join(tree["missing"]))
+        for item in tree["verify_items"]:
+            print("待核验:", item)
+        return
+
     # M6 经济驱动画像（独立命令）
     if "--economy" in sys.argv:
         from app.fetch.industry_documents import run_industry_sources

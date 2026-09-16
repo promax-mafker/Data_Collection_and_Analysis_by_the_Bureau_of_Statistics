@@ -4,3 +4,4 @@ __pycache__/
 data/
 .venv/
 .mcp.json
+.env

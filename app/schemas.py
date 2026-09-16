@@ -37,3 +37,5 @@ class DataValue:
     method: str = "rule"
     caliber: str = "final"        # final=决算/公报 / budget=预算执行口径 / flash=快报
     source_url: str = ""
+    source_kind: str = ""         # bulletin / yearbook / api / thirdparty（M9b）
+    source_rank: int = 1          # 1=统计局主源 2=年鉴 3=异源（主源视图据此裁决）

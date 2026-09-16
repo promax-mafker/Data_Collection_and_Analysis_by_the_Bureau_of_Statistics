@@ -152,10 +152,12 @@ class Repository:
         n = 0
         for v in values:
             self.conn.execute(
-                "INSERT INTO data_values (page_id, bureau_id, region, year, indicator_name, value, unit, category, raw_text, method, caliber, source_url) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO data_values (page_id, bureau_id, region, year, indicator_name, value, unit, category, raw_text, method, caliber, source_url, source_kind, source_rank) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (v.page_id, v.bureau_id, v.region, v.year, v.indicator_name, v.value,
-                 v.unit, v.category, v.raw_text, v.method, v.caliber, v.source_url))
+                 v.unit, v.category, v.raw_text, v.method, v.caliber, v.source_url,
+                 getattr(v, "source_kind", "") or "",
+                 int(getattr(v, "source_rank", 1) or 1)))
             n += 1
         return n
 
@@ -172,9 +174,19 @@ class Repository:
         """整页替换指标值：单事务 DELETE+INSERT。
 
         M7a 护栏：values 为空且非 force → 不删旧值返回 0（防"空解析抹库"）。
+
+        M9b：调用方未填 `page_id`/`bureau_id` 时按目标页补全 —— 否则年鉴等
+        新来源会写入 NULL 归属，后续按页/按机构回溯就会断链。
         """
         if not values and not force:
             return 0
+        row = self.conn.execute("SELECT bureau_id FROM pages WHERE id=?", (page_id,)).fetchone()
+        bureau_id = row["bureau_id"] if row else None
+        for v in values:
+            if not getattr(v, "page_id", None):
+                v.page_id = page_id
+            if not getattr(v, "bureau_id", None):
+                v.bureau_id = bureau_id
         try:
             self.conn.execute("DELETE FROM data_values WHERE page_id=?", (page_id,))
             self._insert_values(values)
@@ -184,8 +196,17 @@ class Repository:
             raise
         return len(values)
 
-    def query_data(self, region=None, indicator=None, year=None, caliber=None):
-        sql = "SELECT * FROM data_values WHERE 1=1"
+    def query_data(self, region=None, indicator=None, year=None, caliber=None,
+                   primary_only=True):
+        """按条件查询数值行。
+
+        ``primary_only=True``（默认）读 **主源视图** `data_values_primary` ——
+        M9b 引入多源后，同一 `(region, year, indicator_name, caliber)` 会有多行
+        （如公报 + 年鉴），若不加隔离，既有分析会看到重复行而**静默算错**
+        （不是报错）。需要跨源对账时显式传 ``primary_only=False``。
+        """
+        table = "data_values_primary" if primary_only else "data_values"
+        sql = f"SELECT * FROM {table} WHERE 1=1"
         params = []
         if region:
             sql += " AND region=?"; params.append(region)
@@ -197,6 +218,74 @@ class Repository:
             sql += " AND caliber=?"; params.append(caliber)
         sql += " ORDER BY id"
         return [dict(r) for r in self.conn.execute(sql, params)]
+
+    def find_ambiguous_groups(self):
+        """找出「同键多行且**值不同**」的组 —— 这是真歧义，不是重复。
+
+        M9b 实测（真实库 1604 行）：**154 组为真歧义，仅 2 组是真重复**。
+        典型样本：三明 2023「居民人均可支配收入」同时有 `36851 / 24822 / 46517`
+        —— 城镇/农村/全体被抽成了同一个指标名，且 `raw_text` 形态一致
+        （「居民人均可支配收入36851元」）无法据以区分。
+
+        主源视图 `data_values_primary` 按 `source_rank` 取一行，对这类组属于
+        **静默择一**（不是去重）。本方法把这些组显式暴露出来，供审计与后续
+        抽取层修复 —— 符合设计 P1「错 > 缺」：宁可报出来，不可悄悄丢掉真实差异。
+
+        值完全相同的多行是真重复，不在结果内。
+        返回 ``[{region, year, indicator_name, caliber, n, values, page_ids}]``。
+        """
+        sql = """
+            SELECT region, year, indicator_name, caliber,
+                   COUNT(*) AS n,
+                   COUNT(DISTINCT value) AS nv,
+                   GROUP_CONCAT(DISTINCT value) AS values_csv,
+                   GROUP_CONCAT(DISTINCT page_id) AS page_ids_csv
+            FROM data_values
+            GROUP BY region, year, indicator_name, caliber
+            HAVING COUNT(*) > 1 AND COUNT(DISTINCT value) > 1
+            ORDER BY nv DESC, region, year
+        """
+        out = []
+        for r in self.conn.execute(sql):
+            out.append({
+                "region": r["region"],
+                "year": r["year"],
+                "indicator_name": r["indicator_name"],
+                "caliber": r["caliber"],
+                "n": r["n"],
+                "values": (r["values_csv"] or "").split(","),
+                "page_ids": [int(x) for x in (r["page_ids_csv"] or "").split(",") if x],
+            })
+        return out
+
+    def find_ambiguous_econ_series(self):
+        """`econ_series` 版的歧义探测：同 `(indicator, year)` 多值。
+
+        为什么需要：`find_ambiguous_groups` 只扫 `data_values`，而债务序列落在
+        `econ_series` —— 实测存在**口径混装**（2022 余额既有执行口径 517.70，
+        又有年初预算口径 454.33；后者的限额 2112.73 恰为 2021 年限额）。
+        这类冲突原先完全隐形。返回 ``[{indicator, year, n, values, sources}]``。
+        """
+        sql = """
+            SELECT indicator, year, COUNT(*) AS n,
+                   COUNT(DISTINCT value) AS nv,
+                   GROUP_CONCAT(DISTINCT value) AS values_csv,
+                   GROUP_CONCAT(DISTINCT source) AS sources_csv
+            FROM econ_series
+            GROUP BY indicator, year
+            HAVING COUNT(*) > 1 AND COUNT(DISTINCT value) > 1
+            ORDER BY indicator, year
+        """
+        out = []
+        for r in self.conn.execute(sql):
+            out.append({
+                "indicator": r["indicator"],
+                "year": r["year"],
+                "n": r["n"],
+                "values": (r["values_csv"] or "").split(","),
+                "sources": (r["sources_csv"] or "").split(","),
+            })
+        return out
 
     def query_lax(self, region_q=None, indicator_q=None, year_q=None, caliber=None):
         """宽容查询：自然语言输入 → 库内精确过滤。

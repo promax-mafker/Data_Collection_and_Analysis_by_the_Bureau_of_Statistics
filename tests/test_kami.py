@@ -67,3 +67,14 @@ def test_economy_report_renders():
     assert "泉州经济驱动画像" in html
     assert "消费" in html and "债务" in html and "净出口" in html
     assert "#f5f4ed" in html
+
+
+def test_economy_report_has_decision_tree_section():
+    """M8：报告含「方法论体检」决策树裁决节；空库输出缺数据说明不报错。"""
+    from app.store.db import init_db
+    from app.store.repository import Repository
+    from app.analysis.economy_report import render_economy_report
+    repo = Repository(init_db(":memory:"))
+    html = render_economy_report(repo)
+    assert "方法论体检" in html
+    assert "缺" in html or "—" in html  # 空库 → 缺数据说明而非空白
