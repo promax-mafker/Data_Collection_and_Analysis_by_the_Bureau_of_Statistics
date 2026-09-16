@@ -206,6 +206,65 @@ def _global_unit(grid, limit=4):
     return ""
 
 
+# 地区列标识（首列为地区名的表）
+_AREA_HEADS = {"地区", "area", "年份", "year"}
+
+
+def parse_city_table(html, table_index=0):
+    """解析「**地区为行、指标为列**」的年鉴表 → ``{"headers", "rows", "unit"}``。
+
+    这是继「年份为列」(`parse_year_columns`) 与「年份为行」(`parse_plain_series`)
+    之后的**第三种朝向**，实测见于福建年鉴各设区市表（如 `0407` 各设区市固定资产投资额）。
+
+    实测结构（`0407.htm`：17 行 × 150 列，colspan 撑大）：:
+
+        行 0-2  表题 / 英文表题 / ``单位：亿元``
+        行 3-4  上层表头  地区 | Area | 固定资产投资…
+        行 5    真正列头  地区 | Area | 数值Total | 比上年增长（%）| 数值Total | …
+        行 6+   数据      首列 = 全 省 / 福州市 / 厦门市 / …
+
+    **年份不在表内** —— 由卷年提供（福建年鉴 `dz2022` 卷载 2021 年数据，
+    即卷年 = 数据年 + 1）。
+
+    只做**结构解析**：指标命名交给配置，避免把「比上年增长（%）」误当成「投资额」。
+    """
+    grid = _grid(html, table_index)
+    if len(grid) < 3:
+        return {"headers": {}, "rows": [], "unit": ""}
+
+    def _is_area_head(cell):
+        t = _clean(cell).lower().replace(" ", "")
+        return t in _AREA_HEADS or t.startswith("area")
+
+    # 列头行 = 首列为地区标识的行中、非空单元格最多的一行（多行表头取最细粒度那行）
+    header_idx, best = None, 0
+    for i, row in enumerate(grid[:12]):
+        if not row or not _is_area_head(row[0]):
+            continue
+        n = sum(1 for c in row if _clean(c))
+        if n > best:
+            header_idx, best = i, n
+    if header_idx is None:
+        return {"headers": {}, "rows": [], "unit": ""}
+
+    headers = {j: _clean(c) for j, c in enumerate(grid[header_idx]) if _clean(c)}
+    rows = []
+    for row in grid[header_idx + 1:]:
+        if not row:
+            continue
+        city = _clean(row[0])
+        if not city or _is_area_head(city):
+            continue
+        cells = {}
+        for j in range(1, len(row)):
+            v = _clean(row[j])
+            if v and v not in _EMPTY_MARKS:
+                cells[j] = v
+        if cells:
+            rows.append({"city": city, "cells": cells})
+    return {"headers": headers, "rows": rows, "unit": _global_unit(grid)}
+
+
 def parse_yearbook_table(html, table_index=0):
     """**按表的真实形状分派**解析 → ``list[YearbookCell]``。
 
