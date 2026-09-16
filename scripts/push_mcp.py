@@ -74,7 +74,7 @@ except Exception as e:
 
 # ---------- 1) 收集待推送文件（git 跟踪的 UTF-8 文本） ----------
 tracked = subprocess.run(["git", "-C", BASE, "ls-files"],
-                         capture_output=True, text=True).stdout.split()
+                         capture_output=True, text=True).stdout.split("\0") if False else subprocess.run(["git", "-C", BASE, "-c", "core.quotepath=false", "ls-files", "-z"], capture_output=True, text=True).stdout.split("\0")
 files, skipped = [], []
 for p in tracked:
     try:
